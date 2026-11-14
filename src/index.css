@@ -1,0 +1,129 @@
+:root {
+  /* Login-page color emotion — forest, sage, olive, champagne */
+  --deep-forest: #0a2820;
+  --pine: #0f3d2e;
+  --dark-moss: #16543f;
+  --sage: #b7c879;
+  --sage-deep: #a3b566;
+  --sage-soft: #c9d98f;
+  --old-gold: #d4b55d;
+  --gold-soft: #e0c878;
+  --champagne: #f1f0e6;
+  --cream-warm: #ebead8;
+  --soft-mist: #e2ebe6;
+  --rt-blue: #2f7fe8;
+  --rt-cyan: #00aeef;
+  --ink: #14201b;
+  --ink-body: #465249;
+  --ink-muted: #465249;
+  --ink-soft: #1d3329;
+  --danger: #b45a4a;
+  --success: #16543f;
+  --warning: #d4b55d;
+  --purple: #6b8f71;
+  --pink: #b7c879;
+  --teal: #16543f;
+
+  --primary: #0f3d2e;
+  --primary-dark: #0a2820;
+  --surface: #ffffff;
+  --surface-2: #f7f8f5;
+  --border: #e4e7e2;
+  --sidebar-w: 260px;
+  --login-olive: #6f8a68;
+  --login-sage: #b7c879;
+
+  --font-display: "Outfit", "Segoe UI", sans-serif;
+  --font-body: "Outfit", "Segoe UI", sans-serif;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --shadow-soft: 0 12px 40px rgba(10, 40, 32, 0.1);
+  --shadow-card: 0 1px 3px rgba(15, 61, 46, 0.04), 0 8px 24px rgba(15, 61, 46, 0.05);
+  --grad-olive-champagne: linear-gradient(90deg, #b7c879 0%, #f1f0e6 100%);
+  --grad-pine-gold: linear-gradient(90deg, #0f3d2e 0%, #d4b55d 100%);
+  --grad-brand: linear-gradient(135deg, #c9d98f 0%, #b7c879 42%, #a3b566 100%);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  font-family: var(--font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--ink);
+  background: var(--champagne);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c5cdb8;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
