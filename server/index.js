@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import express from "express";
 import * as memory from "./db/memoryStore.js";
 import * as mysqlDb from "./db/mysql.js";
+import * as mailService from "./mailService.js";
 
 dotenv.config();
 
@@ -223,13 +224,61 @@ app.get(
   ),
 );
 
-app.get(
-  "/api/mail/status",
-  pick(
-    () => mysqlDb.getMailStatus(),
-    () => memory.getMailStatus(),
-  ),
-);
+app.get("/api/mail/status", (_req, res) => {
+  try {
+    res.json(mailService.getMailStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put("/api/mail/accounts/:kind", async (req, res) => {
+  try {
+    const data = mailService.upsertMailAccount(req.params.kind, req.body || {});
+    res.json(data);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/mail/accounts/:kind/activate", (req, res) => {
+  try {
+    res.json(mailService.setActiveMailAccount(req.params.kind));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/mail/accounts/:kind/test", async (req, res) => {
+  try {
+    const data = await mailService.testMailAccount(req.params.kind);
+    res.json(data);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post("/api/mail/send", async (req, res) => {
+  try {
+    const to = String(req.body?.to || "").trim();
+    const subject = String(req.body?.subject || "").trim();
+    const text = String(req.body?.text || req.body?.message || "").trim();
+    if (!to || !subject || !text) {
+      res.status(400).json({ error: "to, subject, and text are required" });
+      return;
+    }
+    const data = await mailService.sendMail({
+      to,
+      subject,
+      text,
+      html: req.body?.html,
+      accountKind: req.body?.accountKind,
+    });
+    res.json(data);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
 
 app.post("/api/proposals", async (req, res) => {
   try {
@@ -258,7 +307,7 @@ app.post("/api/proposals/:id/send", async (req, res) => {
   try {
     const data = usingMysql
       ? await mysqlDb.sendProposalMail(req.params.id, req.body || {})
-      : memory.sendProposalMail(req.params.id, req.body || {});
+      : await memory.sendProposalMail(req.params.id, req.body || {});
     res.json(data);
   } catch (error) {
     res.status(400).json({ error: error.message });

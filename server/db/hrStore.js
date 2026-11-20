@@ -1,4 +1,4 @@
-export function buildHrDashboard({ employees, candidates, leaveRequests }) {
+ export function buildHrDashboard({ employees, candidates, leaveRequests }) {
   const active = employees.filter((e) => e.status === "active");
   const onboarding = employees.filter((e) => e.status === "onboarding");
   const pendingLeave = leaveRequests.filter((l) => l.status === "pending");

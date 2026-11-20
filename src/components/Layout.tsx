@@ -1,34 +1,20 @@
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
-import {
-  Bell,
-  Bug,
-  CalendarDays,
-  ClipboardList,
-  FileText,
-  FolderKanban,
-  GitBranch,
-  Home,
-  ListTodo,
-  MessageSquare,
-} from "lucide-react";
 import type { CrmStore } from "../data/store";
 import { ROLE_LABELS } from "../lib/permissions";
-import { developerNav, hrAdminNav, mainNav, navGroups, settingsNav, utilityNav } from "../lib/nav";
+import {
+  developerNav,
+  hrAdminNav,
+  mainNav,
+  navGroups,
+  projectManagerNav,
+  salesExecutiveNav,
+  salesManagerNav,
+  settingsNav,
+  utilityNav,
+} from "../lib/nav";
 import { NavIcon } from "./NavIcon";
-
-const developerLucide: Record<string, ComponentType<{ size?: number; strokeWidth?: number; className?: string }>> = {
-  "/": Home,
-  "/projects/tasks": ListTodo,
-  "/projects": FolderKanban,
-  "/dev/daily-report": ClipboardList,
-  "/dev/calendar": CalendarDays,
-  "/dev/messages": MessageSquare,
-  "/dev/bugs": Bug,
-  "/dev/documents": FileText,
-  "/dev/github": GitBranch,
-  "/notifications": Bell,
-};
+import { LiveClock } from "./LiveClock";
 
 function pageTitle(pathname: string) {
   const map: Array<[string, string]> = [
@@ -55,6 +41,9 @@ function pageTitle(pathname: string) {
     ["/hr/payroll", "Payroll"],
     ["/hr/performance", "Performance"],
     ["/hr/exit", "Exit"],
+    ["/hr/reports", "HR Reports"],
+    ["/hr/messages", "Messages"],
+    ["/hr/events", "Events"],
     ["/hr", "HR Dashboard"],
     ["/projects/tasks", "My Tasks"],
     ["/projects", "My Projects"],
@@ -84,16 +73,19 @@ export function Layout({ store }: { store: CrmStore }) {
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const allow = store.allow;
+  const role = store.role;
+  const isAuthenticated = store.isAuthenticated;
 
   const groups = useMemo(
     () =>
       navGroups
         .map((group) => ({
           ...group,
-          items: group.items.filter((item) => store.allow(item.permission)),
+          items: group.items.filter((item) => allow(item.permission)),
         }))
-        .filter((group) => store.allow(group.permission) && group.items.length > 0),
-    [store],
+        .filter((group) => allow(group.permission) && group.items.length > 0),
+    [allow, role, isAuthenticated],
   );
 
   useEffect(() => {
@@ -121,7 +113,7 @@ export function Layout({ store }: { store: CrmStore }) {
     });
     setProfileOpen(false);
     setNotifOpen(false);
-  }, [groups, location.pathname]);
+  }, [location.pathname]);
 
   if (!store.isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -129,9 +121,16 @@ export function Layout({ store }: { store: CrmStore }) {
 
   const utilities = utilityNav.filter((item) => store.allow(item.permission));
   const settings = settingsNav.filter((item) => store.allow(item.permission));
-  const roleNotes = store.data.notifications.filter((n) =>
-    n.audienceRoles.includes(store.role),
-  );
+  const roleNotes = store.data.notifications.filter((n) => {
+    const byUser =
+      Array.isArray(n.audienceUserIds) && n.audienceUserIds.length > 0
+        ? n.audienceUserIds.includes(store.currentUser.id)
+        : false;
+    const byRole = n.audienceRoles.includes(store.role);
+    // Prefer user targeting when present; otherwise role.
+    if (Array.isArray(n.audienceUserIds) && n.audienceUserIds.length > 0) return byUser;
+    return byRole;
+  });
   const unreadNotes = roleNotes.filter((n) => !n.read);
   const unread = unreadNotes.length;
   const recentNotes = [...roleNotes]
@@ -150,22 +149,46 @@ export function Layout({ store }: { store: CrmStore }) {
 
   const isDeveloper = store.role === "developer";
   const isHrAdmin = store.role === "hr_admin";
-  const useFlatNav = isDeveloper || isHrAdmin;
+  const isProjectManager = store.role === "project_manager";
+  const isSalesManager = store.role === "sales_manager";
+  const isSalesExecutive = store.role === "sales_executive";
+  const isFounder = store.role === "founder";
+  const isFinanceAdmin = store.role === "finance_admin";
+  const isWebsiteAdmin = store.role === "website_admin";
+  // Super Admin + HR + PM + Developer + Sales + Finance + Website share pine chrome.
+  // Founder keeps grouped module nav (command-center style); others use flat lists.
+  const useEnterpriseFlat =
+    isFounder ||
+    isHrAdmin ||
+    isProjectManager ||
+    isDeveloper ||
+    isSalesManager ||
+    isSalesExecutive ||
+    isFinanceAdmin ||
+    isWebsiteAdmin;
+  const useFlatNav = useEnterpriseFlat && !isFounder;
   const flatDevNav = developerNav.filter((item) => store.allow(item.permission));
   const flatHrNav = hrAdminNav.filter((item) => store.allow(item.permission));
+  const flatPmNav = projectManagerNav.filter((item) => store.allow(item.permission));
+  const flatSalesNav = salesManagerNav.filter((item) => store.allow(item.permission));
+  const flatSalesExecNav = salesExecutiveNav.filter((item) => store.allow(item.permission));
 
-  const messageBadge = isDeveloper ? Math.max(unread, 3) : unread;
+  const messageBadge = unread;
 
   const orgName = store.data.organization?.name || "RoyalTech Innovation";
 
   return (
-    <div className={`shell shell-preskool${useFlatNav ? " shell-dev" : ""}`}>
-      <aside className={`sidebar sidebar-preskool${useFlatNav ? " sidebar-dev" : ""}`}>
+    <div
+      className={`shell shell-preskool${useEnterpriseFlat ? " shell-hr" : ""}`}
+    >
+      <aside
+        className={`sidebar sidebar-preskool${useEnterpriseFlat ? " sidebar-hr" : ""}`}
+      >
         <div className="brand">
           <img src="/logo.jpeg" alt="RoyalTech Innovation" className="brand-logo" />
           <div>
             <p className="brand-kicker">RoyalTech</p>
-            <h1 className="brand-name">Innovation</h1>
+            <h1 className="brand-name">{isFounder ? "Admin Panel" : "Innovation"}</h1>
           </div>
         </div>
 
@@ -189,34 +212,99 @@ export function Layout({ store }: { store: CrmStore }) {
 
         <nav className={`nav${useFlatNav ? " nav-flat" : ""}`}>
           {isDeveloper ? (
-            flatDevNav.map((item) => {
-              const Lucide = developerLucide[item.path] || Home;
-              return (
-                <NavLink
-                  key={`${item.path}-${item.label}`}
-                  to={item.path}
-                  end={item.path === "/" || item.path === "/projects"}
-                  className={({ isActive }) =>
-                    `nav-link${isActive ? " is-active" : ""}`
-                  }
-                >
-                  <Lucide className="nav-ico lucide" size={18} strokeWidth={2} />
-                  <span>{item.label}</span>
-                  {item.path === "/notifications" && unread > 0 ? (
-                    <span className="nav-badge">{unread}</span>
-                  ) : null}
-                  {item.path === "/dev/messages" ? (
-                    <span className="nav-badge">{Math.min(messageBadge, 9)}</span>
-                  ) : null}
-                </NavLink>
-              );
-            })
+            flatDevNav.map((item) => (
+              <NavLink
+                key={`${item.path}-${item.label}`}
+                to={item.path}
+                end={item.path === "/" || item.path === "/projects"}
+                className={({ isActive }) =>
+                  `nav-link${isActive ? " is-active" : ""}`
+                }
+              >
+                <NavIcon name={item.icon} />
+                <span>{item.label}</span>
+                {item.path === "/notifications" && unread > 0 ? (
+                  <span className="nav-badge">{unread}</span>
+                ) : null}
+                {item.path === "/dev/messages" && messageBadge > 0 ? (
+                  <span className="nav-badge">{Math.min(messageBadge, 9)}</span>
+                ) : null}
+              </NavLink>
+            ))
           ) : isHrAdmin ? (
             flatHrNav.map((item) => (
               <NavLink
                 key={`${item.path}-${item.label}`}
                 to={item.path}
                 end={item.path === "/" || item.path === "/hr"}
+                className={({ isActive }) =>
+                  `nav-link${isActive ? " is-active" : ""}`
+                }
+              >
+                <NavIcon name={item.icon} />
+                <span>{item.label}</span>
+                {item.path === "/notifications" && unread > 0 ? (
+                  <span className="nav-badge">{unread}</span>
+                ) : null}
+              </NavLink>
+            ))
+          ) : isProjectManager ? (
+            flatPmNav.map((item) => (
+              <NavLink
+                key={`${item.path}-${item.label}`}
+                to={item.path}
+                end={
+                  item.path === "/" ||
+                  item.path === "/projects" ||
+                  item.path === "/settings"
+                }
+                className={({ isActive }) =>
+                  `nav-link${isActive ? " is-active" : ""}`
+                }
+              >
+                <NavIcon name={item.icon} />
+                <span>{item.label}</span>
+                {item.path === "/notifications" && unread > 0 ? (
+                  <span className="nav-badge">{unread}</span>
+                ) : null}
+                {item.path === "/dev/messages" && unread > 0 ? (
+                  <span className="nav-badge">{Math.min(unread, 9)}</span>
+                ) : null}
+              </NavLink>
+            ))
+          ) : isSalesManager ? (
+            flatSalesNav.map((item) => (
+              <NavLink
+                key={`${item.path}-${item.label}`}
+                to={item.path}
+                end={
+                  item.path === "/" ||
+                  item.path === "/leads" ||
+                  item.path === "/clients" ||
+                  item.path === "/settings"
+                }
+                className={({ isActive }) =>
+                  `nav-link${isActive ? " is-active" : ""}`
+                }
+              >
+                <NavIcon name={item.icon} />
+                <span>{item.label}</span>
+                {item.path === "/notifications" && unread > 0 ? (
+                  <span className="nav-badge">{unread}</span>
+                ) : null}
+              </NavLink>
+            ))
+          ) : isSalesExecutive ? (
+            flatSalesExecNav.map((item) => (
+              <NavLink
+                key={`${item.path}-${item.label}`}
+                to={item.path}
+                end={
+                  item.path === "/" ||
+                  item.path === "/leads" ||
+                  item.path === "/clients" ||
+                  item.path === "/settings"
+                }
                 className={({ isActive }) =>
                   `nav-link${isActive ? " is-active" : ""}`
                 }
@@ -246,10 +334,13 @@ export function Layout({ store }: { store: CrmStore }) {
                   </NavLink>
                 ))}
 
-              <p className="nav-section">Pages</p>
+              <p className="nav-section">{isFounder ? "Modules" : "Pages"}</p>
 
               {groups.map((group) => {
                 const open = openGroups[group.label] ?? false;
+                const groupTitle = isFounder
+                  ? group.label.replace(/\b\w/g, (c) => c.toUpperCase())
+                  : group.label;
                 return (
                   <div className={`nav-group${open ? " is-open" : ""}`} key={group.label}>
                     <button
@@ -260,7 +351,7 @@ export function Layout({ store }: { store: CrmStore }) {
                     >
                       <span className="nav-group-label">
                         <NavIcon name={group.icon} />
-                        <span>{group.label}</span>
+                        <span>{groupTitle}</span>
                       </span>
                       <span className={`nav-chevron${open ? " is-open" : ""}`} aria-hidden="true">
                         ▾
@@ -283,7 +374,11 @@ export function Layout({ store }: { store: CrmStore }) {
                             }
                           >
                             <NavIcon name={item.icon} />
-                            <span>{item.label}</span>
+                            <span>
+                              {isFounder
+                                ? item.label.replace(/\b\w/g, (c) => c.toUpperCase())
+                                : item.label}
+                            </span>
                           </NavLink>
                         ))}
                       </div>
@@ -292,7 +387,7 @@ export function Layout({ store }: { store: CrmStore }) {
                 );
               })}
 
-              <p className="nav-section">Applications</p>
+              <p className="nav-section">{isFounder ? "System" : "Applications"}</p>
 
               {utilities.map((item) => (
                 <NavLink
@@ -363,14 +458,23 @@ export function Layout({ store }: { store: CrmStore }) {
 
         <div className="sidebar-foot">
           <div className="sidebar-user">
-            <div className="session-avatar" aria-hidden>
-              {store.currentUser.name
-                .split(" ")
-                .map((part) => part[0])
-                .join("")
-                .slice(0, 2)
-                .toUpperCase()}
-            </div>
+            {store.currentUser.avatarUrl ? (
+              <img
+                className="session-avatar session-avatar-img"
+                src={store.currentUser.avatarUrl}
+                alt=""
+              />
+            ) : (
+              <div className="session-avatar" aria-hidden>
+                {store.currentUser.avatarInitials ||
+                  store.currentUser.name
+                    .split(" ")
+                    .map((part) => part[0])
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase()}
+              </div>
+            )}
             <div className="sidebar-user-meta">
               <strong>{store.currentUser.name}</strong>
               <span>{ROLE_LABELS[store.role] || store.role}</span>
@@ -383,7 +487,7 @@ export function Layout({ store }: { store: CrmStore }) {
       </aside>
 
       <div className="workspace">
-        <header className={`topbar topbar-preskool${useFlatNav ? " topbar-dev" : ""}`}>
+        <header className={`topbar topbar-preskool${useEnterpriseFlat ? " topbar-hr" : ""}`}>
           <label className="topbar-search">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -393,13 +497,20 @@ export function Layout({ store }: { store: CrmStore }) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={
-                isDeveloper ? "Search tasks, projects..." : "Search"
+                useEnterpriseFlat ? "Search…" : "Search"
               }
               aria-label="Search"
             />
           </label>
 
+          <div className="topbar-brand-center" aria-label="RoyalTech Innovation Management System">
+            <strong>RoyalTech Innovation</strong>
+            <span>Management System</span>
+          </div>
+
           <div className="topbar-actions">
+            <LiveClock />
+
             <Link
               to="/settings"
               className="topbar-icon"
@@ -469,14 +580,22 @@ export function Layout({ store }: { store: CrmStore }) {
             <div className="topbar-profile-wrap">
               <button
                 type="button"
-                className={`topbar-profile${isDeveloper ? " topbar-profile-compact" : ""}`}
+                className="topbar-profile"
                 aria-expanded={profileOpen}
                 onClick={() => {
                   setProfileOpen((v) => !v);
                   setNotifOpen(false);
                 }}
               >
-                <span className="topbar-avatar">{store.currentUser.avatarInitials}</span>
+                {store.currentUser.avatarUrl ? (
+                  <img
+                    className="topbar-avatar topbar-avatar-img"
+                    src={store.currentUser.avatarUrl}
+                    alt=""
+                  />
+                ) : (
+                  <span className="topbar-avatar">{store.currentUser.avatarInitials}</span>
+                )}
                 {!isDeveloper ? (
                   <span className="topbar-profile-meta">
                     <strong>{firstName}</strong>
@@ -488,7 +607,15 @@ export function Layout({ store }: { store: CrmStore }) {
               {profileOpen ? (
                 <div className="topbar-menu">
                   <div className="topbar-menu-head">
-                    <span className="topbar-avatar lg">{store.currentUser.avatarInitials}</span>
+                    {store.currentUser.avatarUrl ? (
+                      <img
+                        className="topbar-avatar lg topbar-avatar-img"
+                        src={store.currentUser.avatarUrl}
+                        alt=""
+                      />
+                    ) : (
+                      <span className="topbar-avatar lg">{store.currentUser.avatarInitials}</span>
+                    )}
                     <div>
                       <p>{store.currentUser.name}</p>
                       <small>{store.currentUser.email}</small>
@@ -509,29 +636,31 @@ export function Layout({ store }: { store: CrmStore }) {
           </div>
         </header>
 
-        <div className="page-toolbar">
-          <nav className="breadcrumbs" aria-label="Breadcrumb">
-            <span>{ROLE_LABELS[store.role]} Dashboard</span>
-            <span aria-hidden>/</span>
-            <strong>{title}</strong>
-          </nav>
-          <div className="page-toolbar-actions">
-            {store.allow("leads.write") ? (
-              <Link className="btn btn-primary" to="/leads/new">
-                Add New Lead
-              </Link>
-            ) : null}
-            {store.allow("sales.reports") ? (
-              <Link className="btn btn-secondary" to="/sales/reports">
-                Sales Details
-              </Link>
-            ) : store.allow("finance") ? (
-              <Link className="btn btn-secondary" to="/finance">
-                Finance Details
-              </Link>
-            ) : null}
+        {!useEnterpriseFlat ? (
+          <div className="page-toolbar">
+            <nav className="breadcrumbs" aria-label="Breadcrumb">
+              <span>{ROLE_LABELS[store.role]} Dashboard</span>
+              <span aria-hidden>/</span>
+              <strong>{title}</strong>
+            </nav>
+            <div className="page-toolbar-actions">
+              {store.allow("leads.write") ? (
+                <Link className="btn btn-primary" to="/leads/new">
+                  Add New Lead
+                </Link>
+              ) : null}
+              {store.allow("sales.reports") ? (
+                <Link className="btn btn-secondary" to="/sales/reports">
+                  Sales Details
+                </Link>
+              ) : store.allow("finance") ? (
+                <Link className="btn btn-secondary" to="/finance">
+                  Finance Details
+                </Link>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {unreadNotes[0] ? (
           <div className="toast-banner" role="status">
@@ -540,9 +669,6 @@ export function Layout({ store }: { store: CrmStore }) {
               <strong>{unreadNotes[0].title}</strong>
               {unreadNotes[0].body ? ` — ${unreadNotes[0].body}` : ""}
             </p>
-            <Link to="/notifications" onClick={() => setNotifOpen(false)}>
-              View
-            </Link>
           </div>
         ) : null}
 

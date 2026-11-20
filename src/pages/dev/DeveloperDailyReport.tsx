@@ -1,19 +1,9 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { CrmStore } from "../../data/store";
+import type { DailyReportStatus } from "../../types";
 import { formatDate } from "../../lib/format";
 import { RequirePermission } from "../../components/RequirePermission";
-
-type ReportStatus = "In Progress" | "Completed" | "Blocked";
-type SavedReport = {
-  id: string;
-  date: string;
-  tasksCompleted: number;
-  hours: number;
-  status: "Submitted";
-  description: string;
-  workStatus: ReportStatus;
-};
 
 function todayLabel() {
   return new Date().toLocaleDateString("en-US", {
@@ -24,70 +14,54 @@ function todayLabel() {
 }
 
 export function DeveloperDailyReport({ store }: { store: CrmStore }) {
+  const me = store.currentUser;
+  const manager =
+    store.data.users.find((u) => u.id === me.managerId) ??
+    store.data.users.find((u) => u.role === "project_manager");
+
   const doing = store.visibleTasks.filter((t) => t.status === "doing").length;
   const done = store.visibleTasks.filter((t) => t.status === "done").length;
   const total = store.visibleTasks.length;
-  const completion = total ? Math.round((done / total) * 100) : 87;
+  const completion = total ? Math.round((done / total) * 100) : 0;
+
+  const reports = store.visibleDailyReports;
 
   const [description, setDescription] = useState("");
-  const [workStatus, setWorkStatus] = useState<ReportStatus>("In Progress");
+  const [workStatus, setWorkStatus] = useState<DailyReportStatus>("In Progress");
   const [hours, setHours] = useState("4");
   const [fileName, setFileName] = useState("");
   const [notice, setNotice] = useState("");
-  const [reports, setReports] = useState<SavedReport[]>([
-    {
-      id: "r1",
-      date: "2026-11-10",
-      tasksCompleted: 3,
-      hours: 6,
-      status: "Submitted",
-      description: "Finished API auth endpoints and reviewed PR feedback.",
-      workStatus: "Completed",
-    },
-    {
-      id: "r2",
-      date: "2026-11-09",
-      tasksCompleted: 2,
-      hours: 5,
-      status: "Submitted",
-      description: "Fixed responsive dashboard bugs and logged remaining QA.",
-      workStatus: "In Progress",
-    },
-    {
-      id: "r3",
-      date: "2026-11-08",
-      tasksCompleted: 4,
-      hours: 7,
-      status: "Submitted",
-      description: "Database optimization pass and sync contract updates.",
-      workStatus: "Completed",
-    },
-  ]);
+  const [error, setError] = useState("");
   const [viewId, setViewId] = useState<string | null>(null);
 
-  const weekPoints = useMemo(() => [72, 78, 81, 86, 88, 90, 92], []);
-  const perf = 92;
-  const hoursLogged = reports.slice(0, 1).reduce((s, r) => s + r.hours, 0) || 6;
+  const weekPoints = useMemo(() => {
+    const base = Math.max(completion, 40);
+    return [0, 1, 2, 3, 4, 5, 6].map((i) => Math.min(98, base - 12 + i * 3));
+  }, [completion]);
+  const perf = completion || Math.min(92, 40 + done * 8);
+  const hoursLogged = reports[0]?.hours ?? 0;
+  const todaySubmitted = reports.some(
+    (r) => r.date === new Date().toISOString().slice(0, 10) && r.developerId === me.id,
+  );
 
   const onSubmit = () => {
-    if (!description.trim()) {
-      setNotice("Please describe what you worked on today.");
+    setError("");
+    setNotice("");
+    const res = store.submitDailyReport({
+      description,
+      workStatus,
+      hours: Number(hours) || 0,
+      tasksCompleted: Math.max(done, doing > 0 ? 1 : 0),
+      attachmentName: fileName || undefined,
+    });
+    if (!res.ok) {
+      setError(res.error);
       return;
     }
-    const next: SavedReport = {
-      id: `r${Date.now()}`,
-      date: new Date().toISOString().slice(0, 10),
-      tasksCompleted: Math.max(doing + done, 1),
-      hours: Number(hours) || 4,
-      status: "Submitted",
-      description: description.trim(),
-      workStatus,
-    };
-    setReports((prev) => [next, ...prev]);
     setDescription("");
     setFileName("");
-    setNotice("Daily report submitted to your project manager.");
-    setViewId(next.id);
+    setNotice(`Report sent to ${res.managerName}. They can see it on their dashboard.`);
+    setViewId(res.reportId);
   };
 
   const viewing = reports.find((r) => r.id === viewId) ?? null;
@@ -128,11 +102,18 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
               </span>
               Daily Report
             </h2>
-            <p>Share your daily work progress and updates.</p>
+            <p>
+              Submit to your manager{manager ? ` (${manager.name})` : ""}. Reports are saved and
+              visible on the manager dashboard.
+            </p>
           </div>
         </section>
 
         {notice ? <p className="dr-notice">{notice}</p> : null}
+        {error ? <p className="dr-notice" style={{ color: "#9b2c2c" }}>{error}</p> : null}
+        {todaySubmitted ? (
+          <p className="dr-notice">You already submitted a report today — you can send another update if needed.</p>
+        ) : null}
 
         <section className="dr-strip" aria-label="Report actions and stats">
           <article className="dr-strip-submit">
@@ -187,8 +168,8 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
               </svg>
             </span>
             <div>
-              <p>Tasks Today</p>
-              <h3>{Math.max(doing, 3)}</h3>
+              <p>Tasks open</p>
+              <h3>{doing + store.visibleTasks.filter((t) => t.status === "todo").length}</h3>
             </div>
           </article>
 
@@ -226,7 +207,7 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
             </span>
             <div>
               <p>Completion</p>
-              <h3>{completion || 87}%</h3>
+              <h3>{completion}%</h3>
             </div>
           </article>
 
@@ -240,8 +221,8 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
               </svg>
             </span>
             <div>
-              <p>On Time</p>
-              <h3>Yes</h3>
+              <p>Reports sent</p>
+              <h3>{reports.length}</h3>
             </div>
           </article>
         </section>
@@ -263,7 +244,7 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
                 <span>Task Status</span>
                 <select
                   value={workStatus}
-                  onChange={(e) => setWorkStatus(e.target.value as ReportStatus)}
+                  onChange={(e) => setWorkStatus(e.target.value as DailyReportStatus)}
                 >
                   <option>In Progress</option>
                   <option>Completed</option>
@@ -319,7 +300,7 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
                   strokeLinejoin="round"
                 />
               </svg>
-              Submit Report
+              Submit to {manager?.name?.split(" ")[0] ?? "manager"}
             </button>
           </article>
 
@@ -334,14 +315,14 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>Tasks Completed</th>
+                      <th>Tasks</th>
                       <th>Hours</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {reports.slice(0, 5).map((report) => (
+                    {reports.slice(0, 6).map((report) => (
                       <tr key={report.id}>
                         <td>{formatDate(report.date)}</td>
                         <td>{report.tasksCompleted}</td>
@@ -369,15 +350,24 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
                         </td>
                       </tr>
                     ))}
+                    {reports.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="muted">
+                          No reports yet. Submit one to your manager.
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>
               {viewing ? (
                 <div className="dr-preview">
                   <strong>
-                    {formatDate(viewing.date)} · {viewing.workStatus}
+                    {formatDate(viewing.date)} · {viewing.workStatus} · sent to{" "}
+                    {manager?.name ?? "manager"}
                   </strong>
                   <p>{viewing.description}</p>
+                  {viewing.attachmentName ? <small>File: {viewing.attachmentName}</small> : null}
                 </div>
               ) : null}
             </article>
@@ -391,7 +381,7 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
                 <div
                   className="dr-gauge"
                   style={{
-                    background: `conic-gradient(#00aeef 0 ${perf}%, #d9e2de ${perf}% 100%)`,
+                    background: `conic-gradient(#a3a65b 0 ${perf}%, #eef0d8 ${perf}% 100%)`,
                   }}
                   aria-hidden
                 >
@@ -407,7 +397,7 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
                         .map((p, i) => `L${8 + i * 38} ${100 - p * 0.7}`)
                         .join(" ")}`}
                       fill="none"
-                      stroke="#00aeef"
+                      stroke="#a3a65b"
                       strokeWidth="3"
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -418,7 +408,7 @@ export function DeveloperDailyReport({ store }: { store: CrmStore }) {
                         cx={8 + i * 38}
                         cy={100 - p * 0.7}
                         r={i === weekPoints.length - 1 ? 4.5 : 3}
-                        fill={i === weekPoints.length - 1 ? "#0f3d2e" : "#00aeef"}
+                        fill={i === weekPoints.length - 1 ? "#1b2a22" : "#a3a65b"}
                       />
                     ))}
                   </svg>

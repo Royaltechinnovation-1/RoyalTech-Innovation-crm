@@ -1,4 +1,12 @@
-import { useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import type { CrmStore } from "../../data/store";
 import { formatCurrency, formatDate } from "../../lib/format";
@@ -8,6 +16,7 @@ import {
   type HrmCandidate,
   type HrmEmployee,
   type HrmInterview,
+  type HrmJob,
   type HrmLeave,
   type HrmOnboarding,
   type HrmPerformance,
@@ -80,11 +89,59 @@ function confirmRemove(label: string) {
   return window.confirm(`Remove ${label}? This cannot be undone.`);
 }
 
+function useHorizontalDragScroll<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let down = false;
+    let startX = 0;
+    let scrollLeft = 0;
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType === "touch") return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("button, a, input, select, textarea, label, [data-no-drag]")) return;
+      down = true;
+      startX = e.pageX;
+      scrollLeft = el.scrollLeft;
+      el.setPointerCapture(e.pointerId);
+      el.style.cursor = "grabbing";
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!down) return;
+      e.preventDefault();
+      el.scrollLeft = scrollLeft - (e.pageX - startX);
+    };
+    const onUp = (e: PointerEvent) => {
+      down = false;
+      el.style.cursor = "grab";
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    };
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+    return () => {
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
+  return ref;
+}
+
 export function HrmEmployees({ store }: { store: CrmStore }) {
   const hrm = useHrmStore();
+  const scrollRef = useHorizontalDragScroll<HTMLDivElement>();
   const [query, setQuery] = useState("");
   const [dept, setDept] = useState("all");
   const [edit, setEdit] = useState<Partial<HrmEmployee> | null>(null);
+  const [tab, setTab] = useState<"list" | "cards">("list");
   const showSalary = store.allow("salary.view");
   const depts = [...new Set(hrm.employees.map((e) => e.department))];
   const rows = useMemo(
@@ -93,7 +150,7 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
         const q = query.trim().toLowerCase();
         const matchQ =
           !q ||
-          `${e.name} ${e.email} ${e.designation} ${e.department}`.toLowerCase().includes(q);
+          `${e.name} ${e.email} ${e.companyEmail ?? ""} ${e.cardNumber ?? ""} ${e.uid ?? ""} ${e.designation} ${e.department}`.toLowerCase().includes(q);
         return matchQ && (dept === "all" || e.department === dept);
       }),
     [dept, hrm.employees, query],
@@ -101,14 +158,33 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
 
   const onSave = (e: FormEvent) => {
     e.preventDefault();
-    if (!edit?.name?.trim() || !edit?.email?.trim()) return;
+    e.stopPropagation();
+    if (!edit?.name?.trim()) {
+      window.alert("Name is required.");
+      return;
+    }
     hrm.actions.upsertEmployee({
       ...edit,
+      id: edit.id,
       name: edit.name.trim(),
-      email: edit.email.trim(),
+      email: (edit.email ?? "").trim(),
+      companyEmail: (edit.companyEmail ?? "").trim(),
+      cardNumber: (edit.cardNumber ?? "").trim(),
+      phone: (edit.phone ?? "").trim(),
       salary: Number(edit.salary) || 0,
     } as HrmEmployee);
     setEdit(null);
+  };
+
+  const onEdit = (emp: HrmEmployee) => {
+    setEdit({ ...emp });
+  };
+
+  const onDelete = (emp: HrmEmployee) => {
+    if (!emp.id) return;
+    if (!window.confirm(`Remove ${emp.name} (${emp.id})?\nThis cannot be undone.`)) return;
+    hrm.actions.removeEmployee(emp.id);
+    if (edit?.id === emp.id) setEdit(null);
   };
 
   return (
@@ -117,7 +193,7 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
       permission="hr.employees"
       crumb="Employees"
       title="Employee directory"
-      lede="Add, edit, or remove people in the organization."
+      lede="Every employee has an office card. Use side tabs like Attendance — list or card register."
       actions={
         <>
           <button className="btn btn-secondary" type="button" onClick={() => hrm.actions.reset()}>
@@ -130,13 +206,19 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
               setEdit({
                 name: "",
                 email: "",
-                department: "People",
+                companyEmail: "",
+                cardNumber: `RT${String(9801000 + hrm.employees.length + 1).padStart(7, "0")}`,
+                department: "Developer Team",
                 designation: "Employee",
                 status: "Active",
-                location: "Bengaluru",
+                employmentType: "Full-time",
+                location: "Mohali",
+                manager: "CEO (Shreya)",
                 joiningDate: new Date().toISOString().slice(0, 10),
                 salary: 0,
                 phone: "",
+                salaryNotes: "IN Hand no deduction",
+                probationPeriod: "3 Months",
               })
             }
           >
@@ -145,13 +227,34 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
         </>
       }
     >
+      <div className="hrm-tabs" role="tablist" aria-label="Employee views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "list"}
+          className={`hrm-tab${tab === "list" ? " is-active" : ""}`}
+          onClick={() => setTab("list")}
+        >
+          Employee list
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "cards"}
+          className={`hrm-tab${tab === "cards" ? " is-active" : ""}`}
+          onClick={() => setTab("cards")}
+        >
+          Card register
+        </button>
+      </div>
+
       <div className="ai-toolbar">
         <div className="ai-toolbar-left">
           <input
             className="ai-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search employees…"
+            placeholder="Search name or card…"
           />
           <select className="ai-sort" value={dept} onChange={(e) => setDept(e.target.value)}>
             <option value="all">All departments</option>
@@ -162,24 +265,40 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
             ))}
           </select>
         </div>
-        <span className="muted">{rows.length} people</span>
+        <span className="muted">{rows.length} people · each has a card</span>
       </div>
 
-      <section className="rd-table-card">
+      {tab === "list" ? (
+      <section className="rd-table-card hrm-dir-card">
         <header>
-          <h3>Directory</h3>
+          <h3>Employee list</h3>
+          <span className="muted" style={{ fontSize: 12 }}>
+            ← scroll horizontally →
+          </span>
         </header>
-        <div className="ai-table-wrap">
-          <table className="ai-table">
+        <div
+          ref={scrollRef}
+          className="ai-table-wrap hrm-dir-scroll"
+          role="region"
+          aria-label="Employee directory horizontal scroll"
+          tabIndex={0}
+        >
+          <table className="ai-table hrm-dir-table">
             <thead>
               <tr>
-                <th>Employee</th>
+                <th>Card number</th>
+                <th>Name</th>
                 <th>Role</th>
+                <th>Personal email</th>
+                <th>Company email</th>
+                <th>Phone</th>
                 <th>Department</th>
+                <th>Type</th>
                 <th>Location</th>
                 <th>Joined</th>
                 <th>Status</th>
                 {showSalary ? <th>Salary</th> : null}
+                <th>Docs</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -187,37 +306,99 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
               {rows.map((emp) => (
                 <tr key={emp.id}>
                   <td>
+                    <button
+                      type="button"
+                      className="hrm-card-no"
+                      onClick={() => onEdit(emp)}
+                      title="Edit card / employee"
+                    >
+                      {emp.cardNumber || "—"}
+                    </button>
+                  </td>
+                  <td>
                     <div className="ai-cell-user">
                       <span className="ai-av">{initials(emp.name)}</span>
                       <div>
                         <strong>{emp.name}</strong>
-                        <small className="muted">{emp.email}</small>
                       </div>
                     </div>
                   </td>
-                  <td>{emp.designation}</td>
+                  <td>{emp.designation || "—"}</td>
+                  <td>{emp.email || "—"}</td>
+                  <td>{emp.companyEmail || "—"}</td>
+                  <td>{emp.phone || "—"}</td>
                   <td>{emp.department}</td>
-                  <td>{emp.location}</td>
-                  <td>{formatDate(emp.joiningDate)}</td>
+                  <td>{emp.employmentType || "—"}</td>
+                  <td>{emp.location || "—"}</td>
+                  <td>{emp.joiningDate ? formatDate(emp.joiningDate) : "—"}</td>
                   <td>
-                    <span className="ai-status on" style={tone(emp.status)}>
-                      {emp.status}
+                    <select
+                      className="field hrm-status-select"
+                      value={emp.status}
+                      style={tone(emp.status)}
+                      aria-label={`Status for ${emp.name}`}
+                      onChange={(e) =>
+                        hrm.actions.upsertEmployee({
+                          ...emp,
+                          name: emp.name,
+                          email: emp.email ?? "",
+                          status: e.target.value,
+                        })
+                      }
+                    >
+                      {!hrm.employmentStatuses.includes(emp.status) && emp.status ? (
+                        <option value={emp.status}>{emp.status}</option>
+                      ) : null}
+                      {hrm.employmentStatuses.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  {showSalary ? (
+                    <td>
+                      {emp.salary ? formatCurrency(emp.salary) : "—"}
+                      {emp.salaryNotes ? (
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          {emp.salaryNotes}
+                        </div>
+                      ) : null}
+                    </td>
+                  ) : null}
+                  <td>
+                    <span
+                      className="ai-status on"
+                      style={tone(emp.documents?.complete === "Yes" ? "Verified" : "Pending")}
+                    >
+                      {emp.documents?.complete === "Yes" ? "Complete" : "Pending"}
                     </span>
                   </td>
-                  {showSalary ? <td>{formatCurrency(emp.salary)}</td> : null}
-                  <td>
+                  <td className="hrm-actions-cell" data-no-drag="true">
                     <div className="rd-row-actions">
-                      <button type="button" className="rd-soft ok" onClick={() => setEdit({ ...emp })}>
+                      <button
+                        type="button"
+                        className="rd-soft ok"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onEdit(emp);
+                        }}
+                      >
                         Edit
                       </button>
                       <button
                         type="button"
                         className="rd-soft bad"
-                        onClick={() => {
-                          if (confirmRemove(emp.name)) hrm.actions.removeEmployee(emp.id);
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onDelete(emp);
                         }}
                       >
-                        Remove
+                        Delete
                       </button>
                     </div>
                   </td>
@@ -227,6 +408,69 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
           </table>
         </div>
       </section>
+      ) : (
+      <section className="rd-table-card hrm-dir-card">
+        <header>
+          <h3>Card register</h3>
+          <span className="muted">{rows.length} office cards</span>
+        </header>
+        <div className="ai-table-wrap">
+          <table className="ai-table">
+            <thead>
+              <tr>
+                <th>Card number</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Department</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((emp) => (
+                <tr key={emp.id}>
+                  <td>
+                    <button
+                      type="button"
+                      className="hrm-card-no"
+                      onClick={() => onEdit(emp)}
+                      title="Edit card"
+                    >
+                      {emp.cardNumber || "—"}
+                    </button>
+                  </td>
+                  <td>
+                    <div className="ai-cell-user">
+                      <span className="ai-av">{initials(emp.name)}</span>
+                      <div>
+                        <strong>{emp.name}</strong>
+                      </div>
+                    </div>
+                  </td>
+                  <td>{emp.designation || "—"}</td>
+                  <td>{emp.department}</td>
+                  <td>
+                    <span className="ai-status on" style={tone(emp.status)}>
+                      {emp.status}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="rd-row-actions">
+                      <button type="button" className="rd-soft ok" onClick={() => onEdit(emp)}>
+                        Edit card
+                      </button>
+                      <button type="button" className="rd-soft bad" onClick={() => onDelete(emp)}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      )}
 
       {edit ? (
         <HrmEditModal
@@ -242,16 +486,43 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
               required
             />
           </HrmField>
-          <HrmField label="Email">
+          <HrmField label="Office card number">
             <input
               className="field"
-              type="email"
-              value={edit.email ?? ""}
-              onChange={(e) => setEdit((f) => ({ ...f!, email: e.target.value }))}
-              required
+              value={edit.cardNumber ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, cardNumber: e.target.value }))}
+              placeholder="RT9801234"
             />
           </HrmField>
-          <HrmField label="Designation">
+          <HrmField label="Personal email">
+            <input
+              className="field"
+              type="text"
+              inputMode="email"
+              autoComplete="off"
+              value={edit.email ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, email: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Company email (assigned)">
+            <input
+              className="field"
+              type="text"
+              inputMode="email"
+              autoComplete="off"
+              value={edit.companyEmail ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, companyEmail: e.target.value }))}
+              placeholder="name@ryaltehinno.in"
+            />
+          </HrmField>
+          <HrmField label="Phone">
+            <input
+              className="field"
+              value={edit.phone ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, phone: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Designation / Role">
             <input
               className="field"
               value={edit.designation ?? ""}
@@ -261,12 +532,25 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
           <HrmField label="Department">
             <select
               className="field"
-              value={edit.department ?? "People"}
+              value={edit.department ?? "Developer Team"}
               onChange={(e) => setEdit((f) => ({ ...f!, department: e.target.value }))}
             >
               {hrm.departments.map((d) => (
                 <option key={d} value={d}>
                   {d}
+                </option>
+              ))}
+            </select>
+          </HrmField>
+          <HrmField label="Employment type">
+            <select
+              className="field"
+              value={edit.employmentType ?? "Full-time"}
+              onChange={(e) => setEdit((f) => ({ ...f!, employmentType: e.target.value }))}
+            >
+              {["Full-time", "Internship", "Training", "Contract"].map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
@@ -291,6 +575,13 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
               onChange={(e) => setEdit((f) => ({ ...f!, location: e.target.value }))}
             />
           </HrmField>
+          <HrmField label="Reporting manager">
+            <input
+              className="field"
+              value={edit.manager ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, manager: e.target.value }))}
+            />
+          </HrmField>
           <HrmField label="Join date">
             <input
               className="field"
@@ -299,16 +590,53 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
               onChange={(e) => setEdit((f) => ({ ...f!, joiningDate: e.target.value }))}
             />
           </HrmField>
+          <HrmField label="Previous company">
+            <input
+              className="field"
+              value={edit.previousCompany ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, previousCompany: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Total experience">
+            <input
+              className="field"
+              value={edit.totalExperience ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, totalExperience: e.target.value }))}
+            />
+          </HrmField>
           {showSalary ? (
-            <HrmField label="Monthly salary">
-              <input
-                className="field"
-                type="number"
-                value={edit.salary ?? 0}
-                onChange={(e) => setEdit((f) => ({ ...f!, salary: Number(e.target.value) }))}
-              />
-            </HrmField>
+            <>
+              <HrmField label="Monthly salary (INR)">
+                <input
+                  className="field"
+                  type="number"
+                  value={edit.salary ?? 0}
+                  onChange={(e) => setEdit((f) => ({ ...f!, salary: Number(e.target.value) }))}
+                />
+              </HrmField>
+              <HrmField label="Salary notes">
+                <input
+                  className="field"
+                  value={edit.salaryNotes ?? ""}
+                  onChange={(e) => setEdit((f) => ({ ...f!, salaryNotes: e.target.value }))}
+                />
+              </HrmField>
+            </>
           ) : null}
+          <HrmField label="Probation">
+            <input
+              className="field"
+              value={edit.probationPeriod ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, probationPeriod: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Notes">
+            <input
+              className="field"
+              value={edit.notes ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, notes: e.target.value }))}
+            />
+          </HrmField>
         </HrmEditModal>
       ) : null}
     </PageShell>
@@ -317,23 +645,74 @@ export function HrmEmployees({ store }: { store: CrmStore }) {
 
 export function HrmRecruitment({ store }: { store: CrmStore }) {
   const hrm = useHrmStore();
+  const [tab, setTab] = useState<"pipeline" | "candidates" | "jobs">("pipeline");
   const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState("all");
+  const [jobFilter, setJobFilter] = useState("all");
   const [edit, setEdit] = useState<Partial<HrmCandidate> | null>(null);
-  const rows = hrm.candidates.filter((c) => {
-    const job = hrm.jobs.find((j) => j.id === c.jobId);
-    const q = query.trim().toLowerCase();
-    return !q || `${c.name} ${job?.title ?? ""} ${c.stage} ${c.email}`.toLowerCase().includes(q);
-  });
+  const [jobEdit, setJobEdit] = useState<Partial<HrmJob> | null>(null);
 
-  const onSave = (e: FormEvent) => {
+  const stages = hrm.candidateStages;
+  const openJobs = hrm.jobs.filter((j) => j.status === "Open").length;
+  const activePipeline = hrm.candidates.filter((c) => !["Hired", "Rejected"].includes(c.stage)).length;
+  const interviewCount = hrm.candidates.filter((c) => c.stage === "Interview").length;
+  const offerCount = hrm.candidates.filter((c) => c.stage === "Offer").length;
+
+  const rows = useMemo(
+    () =>
+      hrm.candidates.filter((c) => {
+        const job = hrm.jobs.find((j) => j.id === c.jobId);
+        const q = query.trim().toLowerCase();
+        const matchQ =
+          !q ||
+          `${c.name} ${c.email} ${c.phone ?? ""} ${job?.title ?? ""} ${c.stage} ${c.source}`.toLowerCase().includes(q);
+        const matchStage = stageFilter === "all" || c.stage === stageFilter;
+        const matchJob = jobFilter === "all" || c.jobId === jobFilter;
+        return matchQ && matchStage && matchJob;
+      }),
+    [hrm.candidates, hrm.jobs, jobFilter, query, stageFilter],
+  );
+
+  const onSaveCandidate = (e: FormEvent) => {
     e.preventDefault();
-    if (!edit?.name?.trim() || !edit?.email?.trim()) return;
+    if (!edit?.name?.trim()) {
+      window.alert("Candidate name is required.");
+      return;
+    }
     hrm.actions.upsertCandidate({
       ...edit,
       name: edit.name.trim(),
-      email: edit.email.trim(),
+      email: (edit.email ?? "").trim(),
+      phone: (edit.phone ?? "").trim(),
+      rating: Number(edit.rating) || 0,
+      skills: Array.isArray(edit.skills)
+        ? edit.skills
+        : String(edit.skills ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
     } as HrmCandidate);
     setEdit(null);
+  };
+
+  const onSaveJob = (e: FormEvent) => {
+    e.preventDefault();
+    if (!jobEdit?.title?.trim()) {
+      window.alert("Job title is required.");
+      return;
+    }
+    hrm.actions.upsertJob({
+      ...jobEdit,
+      title: jobEdit.title.trim(),
+      openings: Number(jobEdit.openings) || 1,
+      requirements: Array.isArray(jobEdit.requirements)
+        ? jobEdit.requirements
+        : String(jobEdit.requirements ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+    } as HrmJob);
+    setJobEdit(null);
   };
 
   return (
@@ -341,123 +720,380 @@ export function HrmRecruitment({ store }: { store: CrmStore }) {
       store={store}
       permission="hr.recruitment"
       crumb="Recruitment"
-      title="Recruitment & candidates"
-      lede="Edit pipeline stages or remove candidates."
+      title="Recruitment pipeline"
+      lede="Track openings, move candidates by stage, and hire for RoyalTech roles."
       actions={
-        <button
-          className="btn btn-primary"
-          type="button"
-          onClick={() =>
-            setEdit({
-              name: "",
-              email: "",
-              jobId: hrm.jobs[0]?.id ?? "",
-              stage: "Applied",
-              source: "Direct",
-              appliedDate: new Date().toISOString().slice(0, 10),
-            })
-          }
-        >
-          + Add candidate
-        </button>
+        <>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={() =>
+              setJobEdit({
+                title: "",
+                department: "Developer Team",
+                location: "Mohali",
+                type: "Full-time",
+                openings: 1,
+                status: "Open",
+                hiringManager: "CEO (Shreya)",
+                salaryRange: "",
+                postedDate: new Date().toISOString().slice(0, 10),
+                description: "",
+                requirements: [],
+              })
+            }
+          >
+            + Job opening
+          </button>
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={() =>
+              setEdit({
+                name: "",
+                email: "",
+                phone: "",
+                jobId: hrm.jobs.find((j) => j.status === "Open")?.id ?? hrm.jobs[0]?.id ?? "",
+                stage: "Applied",
+                source: "Direct",
+                appliedDate: new Date().toISOString().slice(0, 10),
+                experience: "",
+                location: "Mohali",
+                rating: 0,
+                skills: [],
+                notes: "",
+              })
+            }
+          >
+            + Add candidate
+          </button>
+        </>
       }
     >
       <section className="rd-kpi-row">
         <article className="rd-kpi">
           <p>Open jobs</p>
-          <h3>{hrm.jobs.filter((j) => j.status === "Open").length}</h3>
+          <h3>{openJobs}</h3>
           <small>{hrm.jobs.length} total postings</small>
         </article>
         <article className="rd-kpi">
-          <p>Candidates</p>
-          <h3>{hrm.candidates.length}</h3>
-          <small>In pipeline</small>
+          <p>Active pipeline</p>
+          <h3>{activePipeline}</h3>
+          <small>{hrm.candidates.length} total candidates</small>
         </article>
         <article className="rd-kpi">
-          <p>Interview stage</p>
-          <h3>{hrm.candidates.filter((c) => c.stage === "Interview").length}</h3>
+          <p>In interview</p>
+          <h3>{interviewCount}</h3>
           <small>Active loops</small>
         </article>
         <article className="rd-kpi">
-          <p>Offers</p>
-          <h3>{hrm.candidates.filter((c) => c.stage === "Offer").length}</h3>
-          <small>Pending decisions</small>
+          <p>Offers out</p>
+          <h3>{offerCount}</h3>
+          <small>Awaiting decision</small>
         </article>
       </section>
 
-      <section className="rd-table-card">
-        <header>
-          <h3>Candidates</h3>
-          <input
-            className="ai-search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search…"
-          />
-        </header>
-        <div className="ai-table-wrap">
-          <table className="ai-table">
-            <thead>
-              <tr>
-                <th>Candidate</th>
-                <th>Role</th>
-                <th>Stage</th>
-                <th>Source</th>
-                <th>Applied</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => {
-                const job = hrm.jobs.find((j) => j.id === c.jobId);
-                return (
-                  <tr key={c.id}>
-                    <td>
-                      <div className="ai-cell-user">
-                        <span className="ai-av">{initials(c.name)}</span>
-                        <div>
-                          <strong>{c.name}</strong>
-                          <small className="muted">{c.email}</small>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{job?.title ?? "—"}</td>
-                    <td>
-                      <span className="ai-status on" style={tone(c.stage)}>
-                        {c.stage}
-                      </span>
-                    </td>
-                    <td>{c.source}</td>
-                    <td>{formatDate(c.appliedDate)}</td>
-                    <td>
-                      <div className="rd-row-actions">
-                        <button type="button" className="rd-soft ok" onClick={() => setEdit({ ...c })}>
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="rd-soft bad"
-                          onClick={() => {
-                            if (confirmRemove(c.name)) hrm.actions.removeCandidate(c.id);
-                          }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </td>
+      <div className="hrm-tabs" role="tablist" aria-label="Recruitment views">
+        {(
+          [
+            ["pipeline", "Pipeline"],
+            ["candidates", "Candidates"],
+            ["jobs", "Job openings"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={`hrm-tab${tab === id ? " is-active" : ""}`}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "pipeline" ? (
+        <section className="hrm-pipe-wrap">
+          <div className="hrm-pipe-board">
+            {stages.map((stage) => {
+              const list = hrm.candidates.filter((c) => c.stage === stage);
+              return (
+                <article className="hrm-pipe-col" key={stage}>
+                  <header>
+                    <strong>{stage}</strong>
+                    <span>{list.length}</span>
+                  </header>
+                  <div className="hrm-pipe-list">
+                    {list.length === 0 ? (
+                      <p className="muted hrm-pipe-empty">No candidates</p>
+                    ) : (
+                      list.map((c) => {
+                        const job = hrm.jobs.find((j) => j.id === c.jobId);
+                        return (
+                          <button
+                            type="button"
+                            className="hrm-pipe-card"
+                            key={c.id}
+                            onClick={() => setEdit({ ...c })}
+                          >
+                            <div className="ai-cell-user">
+                              <span className="ai-av">{initials(c.name)}</span>
+                              <div>
+                                <strong>{c.name}</strong>
+                                <small className="muted">{job?.title ?? "Open role"}</small>
+                              </div>
+                            </div>
+                            <div className="hrm-pipe-meta">
+                              <span>{c.source}</span>
+                              <span>{formatDate(c.appliedDate)}</span>
+                            </div>
+                            <select
+                              className="field hrm-status-select"
+                              value={c.stage}
+                              aria-label={`Move ${c.name}`}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                hrm.actions.upsertCandidate({
+                                  ...c,
+                                  name: c.name,
+                                  email: c.email,
+                                  stage: e.target.value,
+                                });
+                              }}
+                            >
+                              {stages.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "candidates" ? (
+        <>
+          <div className="ai-toolbar">
+            <div className="ai-toolbar-left">
+              <input
+                className="ai-search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, email, role…"
+              />
+              <select className="ai-sort" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                <option value="all">All stages</option>
+                {stages.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <select className="ai-sort" value={jobFilter} onChange={(e) => setJobFilter(e.target.value)}>
+                <option value="all">All jobs</option>
+                {hrm.jobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <span className="muted">{rows.length} shown</span>
+          </div>
+
+          <section className="rd-table-card hrm-dir-card">
+            <header>
+              <h3>Candidate list</h3>
+              <span className="muted" style={{ fontSize: 12 }}>
+                ← scroll horizontally →
+              </span>
+            </header>
+            <div className="ai-table-wrap hrm-dir-scroll">
+              <table className="ai-table hrm-dir-table">
+                <thead>
+                  <tr>
+                    <th>Candidate</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Role</th>
+                    <th>Stage</th>
+                    <th>Source</th>
+                    <th>Experience</th>
+                    <th>Applied</th>
+                    <th>Actions</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                </thead>
+                <tbody>
+                  {rows.map((c) => {
+                    const job = hrm.jobs.find((j) => j.id === c.jobId);
+                    return (
+                      <tr key={c.id}>
+                        <td>
+                          <div className="ai-cell-user">
+                            <span className="ai-av">{initials(c.name)}</span>
+                            <div>
+                              <strong>{c.name}</strong>
+                            </div>
+                          </div>
+                        </td>
+                        <td>{c.email || "—"}</td>
+                        <td>{c.phone || "—"}</td>
+                        <td>{job?.title ?? "—"}</td>
+                        <td>
+                          <select
+                            className="field hrm-status-select"
+                            value={c.stage}
+                            onChange={(e) =>
+                              hrm.actions.upsertCandidate({
+                                ...c,
+                                name: c.name,
+                                email: c.email,
+                                stage: e.target.value,
+                              })
+                            }
+                          >
+                            {stages.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>{c.source}</td>
+                        <td>{c.experience || "—"}</td>
+                        <td>{formatDate(c.appliedDate)}</td>
+                        <td className="hrm-actions-cell" data-no-drag="true">
+                          <div className="rd-row-actions">
+                            <button type="button" className="rd-soft ok" onClick={() => setEdit({ ...c })}>
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="rd-soft bad"
+                              onClick={() => {
+                                if (confirmRemove(c.name)) hrm.actions.removeCandidate(c.id);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {tab === "jobs" ? (
+        <section className="rd-table-card hrm-dir-card">
+          <header>
+            <h3>Job openings</h3>
+            <span className="muted">{hrm.jobs.length} roles</span>
+          </header>
+          <div className="ai-table-wrap hrm-dir-scroll">
+            <table className="ai-table hrm-dir-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Department</th>
+                  <th>Type</th>
+                  <th>Location</th>
+                  <th>Openings</th>
+                  <th>Salary</th>
+                  <th>Status</th>
+                  <th>Posted</th>
+                  <th>Candidates</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hrm.jobs.map((j) => {
+                  const count = hrm.candidates.filter((c) => c.jobId === j.id).length;
+                  return (
+                    <tr key={j.id}>
+                      <td>
+                        <strong>{j.title}</strong>
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          {j.hiringManager}
+                        </div>
+                      </td>
+                      <td>{j.department}</td>
+                      <td>{j.type}</td>
+                      <td>{j.location}</td>
+                      <td>{j.openings}</td>
+                      <td>{j.salaryRange || "—"}</td>
+                      <td>
+                        <select
+                          className="field hrm-status-select"
+                          value={j.status}
+                          onChange={(e) =>
+                            hrm.actions.upsertJob({
+                              ...j,
+                              title: j.title,
+                              status: e.target.value,
+                            })
+                          }
+                        >
+                          {hrm.jobStatuses.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>{formatDate(j.postedDate)}</td>
+                      <td>{count}</td>
+                      <td className="hrm-actions-cell">
+                        <div className="rd-row-actions">
+                          <button type="button" className="rd-soft ok" onClick={() => setJobEdit({ ...j })}>
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="rd-soft bad"
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Remove job “${j.title}” and its ${count} candidate(s)?`,
+                                )
+                              ) {
+                                hrm.actions.removeJob(j.id);
+                              }
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {edit ? (
         <HrmEditModal
           title={edit.id ? "Edit candidate" : "Add candidate"}
           onClose={() => setEdit(null)}
-          onSubmit={onSave}
+          onSubmit={onSaveCandidate}
         >
           <HrmField label="Name">
             <input
@@ -470,10 +1106,17 @@ export function HrmRecruitment({ store }: { store: CrmStore }) {
           <HrmField label="Email">
             <input
               className="field"
-              type="email"
+              type="text"
+              inputMode="email"
               value={edit.email ?? ""}
               onChange={(e) => setEdit((f) => ({ ...f!, email: e.target.value }))}
-              required
+            />
+          </HrmField>
+          <HrmField label="Phone">
+            <input
+              className="field"
+              value={edit.phone ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, phone: e.target.value }))}
             />
           </HrmField>
           <HrmField label="Job">
@@ -484,7 +1127,7 @@ export function HrmRecruitment({ store }: { store: CrmStore }) {
             >
               {hrm.jobs.map((j) => (
                 <option key={j.id} value={j.id}>
-                  {j.title}
+                  {j.title} ({j.status})
                 </option>
               ))}
             </select>
@@ -495,20 +1138,159 @@ export function HrmRecruitment({ store }: { store: CrmStore }) {
               value={edit.stage ?? "Applied"}
               onChange={(e) => setEdit((f) => ({ ...f!, stage: e.target.value }))}
             >
-              {["Applied", "Screening", "Shortlisted", "Interview", "Offer", "Hired", "Rejected"].map(
-                (s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ),
-              )}
+              {stages.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           </HrmField>
           <HrmField label="Source">
+            <select
+              className="field"
+              value={edit.source ?? "Direct"}
+              onChange={(e) => setEdit((f) => ({ ...f!, source: e.target.value }))}
+            >
+              {hrm.candidateSources.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </HrmField>
+          <HrmField label="Experience">
             <input
               className="field"
-              value={edit.source ?? ""}
-              onChange={(e) => setEdit((f) => ({ ...f!, source: e.target.value }))}
+              value={edit.experience ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, experience: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Location">
+            <input
+              className="field"
+              value={edit.location ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, location: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Skills (comma separated)">
+            <input
+              className="field"
+              value={Array.isArray(edit.skills) ? edit.skills.join(", ") : (edit.skills as string) ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, skills: e.target.value as unknown as string[] }))}
+            />
+          </HrmField>
+          <HrmField label="Notes">
+            <input
+              className="field"
+              value={edit.notes ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, notes: e.target.value }))}
+            />
+          </HrmField>
+        </HrmEditModal>
+      ) : null}
+
+      {jobEdit ? (
+        <HrmEditModal
+          title={jobEdit.id ? "Edit job opening" : "Add job opening"}
+          onClose={() => setJobEdit(null)}
+          onSubmit={onSaveJob}
+        >
+          <HrmField label="Title">
+            <input
+              className="field"
+              value={jobEdit.title ?? ""}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, title: e.target.value }))}
+              required
+            />
+          </HrmField>
+          <HrmField label="Department">
+            <select
+              className="field"
+              value={jobEdit.department ?? "Developer Team"}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, department: e.target.value }))}
+            >
+              {hrm.departments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </HrmField>
+          <HrmField label="Type">
+            <select
+              className="field"
+              value={jobEdit.type ?? "Full-time"}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, type: e.target.value }))}
+            >
+              {["Full-time", "Internship", "Training", "Contract"].map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </HrmField>
+          <HrmField label="Location">
+            <input
+              className="field"
+              value={jobEdit.location ?? ""}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, location: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Openings">
+            <input
+              className="field"
+              type="number"
+              min={1}
+              value={jobEdit.openings ?? 1}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, openings: Number(e.target.value) }))}
+            />
+          </HrmField>
+          <HrmField label="Salary range">
+            <input
+              className="field"
+              value={jobEdit.salaryRange ?? ""}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, salaryRange: e.target.value }))}
+              placeholder="₹20,000 – ₹30,000 / month"
+            />
+          </HrmField>
+          <HrmField label="Status">
+            <select
+              className="field"
+              value={jobEdit.status ?? "Open"}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, status: e.target.value }))}
+            >
+              {hrm.jobStatuses.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </HrmField>
+          <HrmField label="Hiring manager">
+            <input
+              className="field"
+              value={jobEdit.hiringManager ?? ""}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, hiringManager: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Requirements (comma separated)">
+            <input
+              className="field"
+              value={
+                Array.isArray(jobEdit.requirements)
+                  ? jobEdit.requirements.join(", ")
+                  : (jobEdit.requirements as string) ?? ""
+              }
+              onChange={(e) =>
+                setJobEdit((f) => ({ ...f!, requirements: e.target.value as unknown as string[] }))
+              }
+            />
+          </HrmField>
+          <HrmField label="Description">
+            <input
+              className="field"
+              value={jobEdit.description ?? ""}
+              onChange={(e) => setJobEdit((f) => ({ ...f!, description: e.target.value }))}
             />
           </HrmField>
         </HrmEditModal>
@@ -881,122 +1663,729 @@ export function HrmOnboarding({ store }: { store: CrmStore }) {
   );
 }
 
+const ATT_STATUSES = [
+  "Present",
+  "Absent",
+  "Late",
+  "Halfday",
+  "Short Leave",
+  "On Leave",
+  "Holiday",
+] as const;
+
+const ATT_YEARS = [2024, 2025, 2026, 2027];
+const ATT_MONTHS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+];
+
+function daysInMonthNum(year: number, month: number) {
+  return new Date(year, month, 0).getDate();
+}
+
+function ymKey(year: number, month: number) {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function attDate(year: number, month: number, day: number) {
+  return `${ymKey(year, month)}-${String(day).padStart(2, "0")}`;
+}
+
+function attTone(status: string) {
+  const s = status.toLowerCase();
+  if (s === "present") return "present";
+  if (s === "absent") return "absent";
+  if (s === "on leave") return "onleave";
+  if (s === "short leave") return "shortleave";
+  if (s === "late") return "late";
+  if (s === "halfday") return "halfday";
+  if (s === "holiday") return "holiday";
+  return "empty";
+}
+
+function AttPill({
+  status,
+  onSingle,
+  onDouble,
+  label,
+}: {
+  status: string;
+  onSingle: () => void;
+  onDouble: () => void;
+  label: string;
+}) {
+  const timer = useRef<number | null>(null);
+  const toneClass = attTone(status || "");
+
+  return (
+    <button
+      type="button"
+      className={`hrm-att-pill is-${toneClass}`}
+      title={`${label}: ${status || "Empty"} · 1 tap Present · 2 taps Absent`}
+      aria-label={`${label}, ${status || "empty"}. Single tap present, double tap absent.`}
+      onClick={() => {
+        if (timer.current) window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => {
+          timer.current = null;
+          onSingle();
+        }, 220);
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault();
+        if (timer.current) {
+          window.clearTimeout(timer.current);
+          timer.current = null;
+        }
+        onDouble();
+      }}
+    >
+      <span aria-hidden="true" />
+    </button>
+  );
+}
+
 export function HrmAttendance({ store }: { store: CrmStore }) {
   const hrm = useHrmStore();
-  const [date, setDate] = useState("2026-11-11");
-  const rows = hrm.attendanceRecords.filter((r) => r.date === date);
-  const maxPresent = Math.max(...hrm.attendanceTrend.map((d) => d.present), 1);
-  const dates = [...new Set(hrm.attendanceRecords.map((r) => r.date))].sort().reverse();
+  const today = new Date();
+  const [year, setYear] = useState(2026);
+  const [month, setMonth] = useState(11);
+  const [day, setDay] = useState(Math.min(today.getDate(), daysInMonthNum(2026, 11)));
+  const [query, setQuery] = useState("");
+  const [bulkStatus, setBulkStatus] = useState<string>("Present");
+  const [tab, setTab] = useState<"day" | "report" | "cards">("day");
+  const [cardScan, setCardScan] = useState("");
+  const [editEmp, setEditEmp] = useState<Partial<HrmEmployee> | null>(null);
+
+  const days = useMemo(() => {
+    const n = daysInMonthNum(year, month);
+    return Array.from({ length: n }, (_, i) => i + 1);
+  }, [year, month]);
+
+  useEffect(() => {
+    const max = daysInMonthNum(year, month);
+    if (day > max) setDay(max);
+  }, [year, month, day]);
+
+  const selectedDate = attDate(year, month, day);
+  const monthKey = ymKey(year, month);
+
+  const byKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of hrm.attendanceRecords) {
+      map.set(`${r.employeeId}|${r.date}`, r.status);
+    }
+    return map;
+  }, [hrm.attendanceRecords]);
+
+  const people = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return hrm.employees.filter(
+      (e) =>
+        !q ||
+        `${e.name} ${e.department} ${e.cardNumber ?? ""} ${e.designation ?? ""} ${e.uid ?? ""}`
+          .toLowerCase()
+          .includes(q),
+    );
+  }, [hrm.employees, query]);
+
+  const dayRows = people.map((emp) => {
+    const status = byKey.get(`${emp.id}|${selectedDate}`) ?? "";
+    return { emp, status };
+  });
+
+  const daySummary = {
+    Present: dayRows.filter((r) => r.status === "Present").length,
+    Absent: dayRows.filter((r) => r.status === "Absent").length,
+    Late: dayRows.filter((r) => r.status === "Late").length,
+    "Short Leave": dayRows.filter((r) => r.status === "Short Leave").length,
+    "On Leave": dayRows.filter((r) => r.status === "On Leave").length,
+    Halfday: dayRows.filter((r) => r.status === "Halfday").length,
+    Holiday: dayRows.filter((r) => r.status === "Holiday").length,
+    Empty: dayRows.filter((r) => !r.status).length,
+  };
+
+  const monthRows = people.map((emp) => {
+    const dayStatuses = days.map((d) => byKey.get(`${emp.id}|${attDate(year, month, d)}`) ?? "");
+    const counts = {
+      P: dayStatuses.filter((s) => s === "Present").length,
+      L: dayStatuses.filter((s) => s === "Late").length,
+      A: dayStatuses.filter((s) => s === "Absent" || s === "On Leave").length,
+      H: dayStatuses.filter((s) => s === "Halfday" || s === "Short Leave").length,
+      F: dayStatuses.filter((s) => s === "Holiday").length,
+    };
+    const marked = dayStatuses.filter(Boolean).length || 1;
+    const pct = Math.round((counts.P / marked) * 100);
+    return { emp, dayStatuses, counts, pct };
+  });
+
+  const setEmpStatus = (emp: HrmEmployee, status: string) => {
+    hrm.actions.setAttendanceDay(emp.id, selectedDate, status, {
+      name: emp.name,
+      department: emp.department,
+    });
+  };
+
+  const markAll = (status: string) => {
+    people.forEach((emp) => setEmpStatus(emp, status));
+  };
+
+  const markByCard = () => {
+    const code = cardScan.trim().toLowerCase();
+    if (!code) return;
+    const emp = hrm.employees.find(
+      (e) => String(e.cardNumber || "").toLowerCase() === code || String(e.uid) === code,
+    );
+    if (!emp) {
+      window.alert(`No employee found for card “${cardScan.trim()}”.`);
+      return;
+    }
+    setEmpStatus(emp, bulkStatus || "Present");
+    setCardScan("");
+  };
+
+  const saveCardEdit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!editEmp?.name?.trim()) return;
+    hrm.actions.upsertEmployee({
+      ...editEmp,
+      name: editEmp.name.trim(),
+      cardNumber: (editEmp.cardNumber ?? "").trim(),
+      email: editEmp.email ?? "",
+    } as HrmEmployee);
+    setEditEmp(null);
+  };
 
   return (
     <PageShell
       store={store}
       permission="hr.attendance"
       crumb="Attendance"
-      title="Attendance & working hours"
-      lede="Update status or remove daily records."
+      title="Attendance report"
+      lede="Use office card number to mark entry. Year → month → date, then Present / Short Leave / all statuses."
+      actions={
+        <button className="btn btn-secondary" type="button" onClick={() => hrm.actions.reset()}>
+          Reset data
+        </button>
+      }
     >
-      <div className="ai-toolbar">
-        <select className="ai-sort" value={date} onChange={(e) => setDate(e.target.value)}>
-          {dates.map((d) => (
-            <option key={d} value={d}>
-              {formatDate(d)}
-            </option>
-          ))}
-        </select>
-        <span className="muted">{rows.length} records</span>
+      <div className="hrm-tabs" role="tablist" aria-label="Attendance views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "day"}
+          className={`hrm-tab${tab === "day" ? " is-active" : ""}`}
+          onClick={() => setTab("day")}
+        >
+          Day mark
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "report"}
+          className={`hrm-tab${tab === "report" ? " is-active" : ""}`}
+          onClick={() => setTab("report")}
+        >
+          Attendance report list
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "cards"}
+          className={`hrm-tab${tab === "cards" ? " is-active" : ""}`}
+          onClick={() => setTab("cards")}
+        >
+          Office cards
+        </button>
       </div>
 
-      <section className="rd-split">
-        <article className="rd-card">
-          <header>
-            <h3>Weekly presence</h3>
-          </header>
-          <div className="rd-bars">
-            {hrm.attendanceTrend.map((d, i) => (
-              <div className="rd-bar" key={`${d.day}-${i}`}>
-                <div className="rd-bar-track">
-                  <span style={{ height: `${Math.max(10, (d.present / maxPresent) * 100)}%` }} />
-                </div>
-                <small>{d.day}</small>
-              </div>
-            ))}
-          </div>
-        </article>
-        <article className="rd-card">
-          <header>
-            <h3>Day summary</h3>
-          </header>
-          <div className="hrm-mini-stats">
-            <div>
-              <span>Present</span>
-              <strong>{rows.filter((r) => r.status === "Present").length}</strong>
-            </div>
-            <div>
-              <span>Late</span>
-              <strong>{rows.filter((r) => r.status === "Late").length}</strong>
-            </div>
-            <div>
-              <span>Absent</span>
-              <strong>{rows.filter((r) => r.status === "Absent").length}</strong>
-            </div>
-          </div>
-        </article>
-      </section>
+      {tab !== "cards" ? (
+        <>
+          <section className="hrm-att-filters">
+            <label className="hrm-att-field">
+              <span>1. Year</span>
+              <select
+                className="field"
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              >
+                {ATT_YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="hrm-att-field">
+              <span>2. Month</span>
+              <select
+                className="field"
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+              >
+                {ATT_MONTHS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="hrm-att-field">
+              <span>3. Date</span>
+              <select className="field" value={day} onChange={(e) => setDay(Number(e.target.value))}>
+                {days.map((d) => {
+                  const iso = attDate(year, month, d);
+                  const weekday = new Date(`${iso}T12:00:00`).toLocaleDateString("en-IN", {
+                    weekday: "short",
+                  });
+                  return (
+                    <option key={d} value={d}>
+                      {String(d).padStart(2, "0")} ({weekday})
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="hrm-att-field grow">
+              <span>Search</span>
+              <input
+                className="field"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Name or card number…"
+              />
+            </label>
+          </section>
 
-      <section className="rd-table-card">
-        <header>
-          <h3>Daily records</h3>
-        </header>
-        <div className="ai-table-wrap">
-          <table className="ai-table">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Department</th>
-                <th>Check in</th>
-                <th>Hours</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 50).map((r) => (
-                <tr key={r.id}>
-                  <td>{r.name}</td>
-                  <td>{r.department}</td>
-                  <td>{r.checkIn}</td>
-                  <td>{r.hours || "—"}</td>
-                  <td>
-                    <select
-                      className="field"
-                      value={r.status}
-                      onChange={(e) => hrm.actions.updateAttendance(r.id, { status: e.target.value })}
-                    >
-                      {["Present", "Late", "Absent", "On Leave"].map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="rd-soft bad"
-                      onClick={() => {
-                        if (confirmRemove(r.name)) hrm.actions.removeAttendance(r.id);
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
+          <div className="hrm-att-status-bar">
+            <span className="hrm-att-status-label">Mark status</span>
+            <div className="hrm-att-status-chips">
+              {ATT_STATUSES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`hrm-att-chip is-${attTone(s)}${bulkStatus === s ? " is-active" : ""}`}
+                  onClick={() => setBulkStatus(s)}
+                >
+                  {s}
+                </button>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </div>
+            <button className="btn btn-primary" type="button" onClick={() => markAll(bulkStatus)}>
+              Apply “{bulkStatus}” to all
+            </button>
+          </div>
+        </>
+      ) : null}
+
+      {tab === "day" ? (
+        <>
+          <div className="hrm-att-legend">
+            <span>
+              <i className="hrm-att-pill is-present" /> Present
+            </span>
+            <span>
+              <i className="hrm-att-pill is-absent" /> Absent
+            </span>
+            <span>
+              <i className="hrm-att-pill is-late" /> Late
+            </span>
+            <span>
+              <i className="hrm-att-pill is-shortleave" /> Short Leave
+            </span>
+            <span>
+              <i className="hrm-att-pill is-onleave" /> On Leave
+            </span>
+            <span>
+              <i className="hrm-att-pill is-holiday" /> Holiday
+            </span>
+          </div>
+
+          <section className="rd-kpi-row hrm-att-day-kpis">
+            {(
+              [
+                ["Present", daySummary.Present],
+                ["Absent", daySummary.Absent],
+                ["Late", daySummary.Late],
+                ["Short Leave", daySummary["Short Leave"]],
+                ["On Leave", daySummary["On Leave"]],
+                ["Empty", daySummary.Empty],
+              ] as const
+            ).map(([label, value]) => (
+              <article className="rd-kpi" key={label}>
+                <p>{label}</p>
+                <h3>{value}</h3>
+                <small>{selectedDate}</small>
+              </article>
+            ))}
+          </section>
+
+          <section className="rd-table-card hrm-dir-card">
+            <header>
+              <h3>Day mark · {formatDate(selectedDate)}</h3>
+              <span className="muted">{dayRows.length} employees</span>
+            </header>
+            <div className="ai-table-wrap">
+              <table className="ai-table">
+                <thead>
+                  <tr>
+                    <th>Card number</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Department</th>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th>Quick mark</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayRows.map(({ emp, status }) => (
+                    <tr key={emp.id}>
+                      <td>
+                        <button
+                          type="button"
+                          className="hrm-card-no"
+                          onClick={() => setEditEmp({ ...emp })}
+                          title="Edit card number"
+                        >
+                          {emp.cardNumber || "—"}
+                        </button>
+                      </td>
+                      <td>
+                        <div className="ai-cell-user">
+                          <span className="ai-av">{initials(emp.name)}</span>
+                          <div>
+                            <strong>{emp.name}</strong>
+                          </div>
+                        </div>
+                      </td>
+                      <td>{emp.designation || "—"}</td>
+                      <td>{emp.department}</td>
+                      <td>
+                        {String(day).padStart(2, "0")} {ATT_MONTHS[month - 1]?.label}
+                      </td>
+                      <td>
+                        <select
+                          className={`field hrm-status-select is-${attTone(status || "")}`}
+                          value={status || ""}
+                          onChange={(e) => {
+                            if (!e.target.value) return;
+                            setEmpStatus(emp, e.target.value);
+                          }}
+                        >
+                          <option value="">— Select —</option>
+                          {ATT_STATUSES.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <div className="rd-row-actions">
+                          <button
+                            type="button"
+                            className="rd-soft ok"
+                            onClick={() => setEmpStatus(emp, "Present")}
+                          >
+                            Present
+                          </button>
+                          <button
+                            type="button"
+                            className="rd-soft"
+                            onClick={() => setEmpStatus(emp, "Short Leave")}
+                          >
+                            Short leave
+                          </button>
+                          <button
+                            type="button"
+                            className="rd-soft bad"
+                            onClick={() => setEmpStatus(emp, "Absent")}
+                          >
+                            Absent
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : tab === "report" ? (
+        <>
+          <div className="hrm-att-legend">
+            <span>
+              <i className="hrm-att-pill is-present" /> Present
+            </span>
+            <span>
+              <i className="hrm-att-pill is-absent" /> Absent
+            </span>
+            <span>
+              <i className="hrm-att-pill is-late" /> Late
+            </span>
+            <span>
+              <i className="hrm-att-pill is-halfday" /> Halfday
+            </span>
+            <span>
+              <i className="hrm-att-pill is-holiday" /> Holiday
+            </span>
+            <em className="muted">1 tap Present · 2 taps Absent</em>
+          </div>
+
+          <section className="rd-table-card hrm-dir-card hrm-att-card">
+            <header>
+              <h3>Attendance report list</h3>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Overall record · {ATT_MONTHS[month - 1]?.label} {year} · scroll days →
+              </span>
+            </header>
+            <div className="ai-table-wrap hrm-dir-scroll hrm-att-scroll">
+              <table className="ai-table hrm-att-table">
+                <thead>
+                  <tr>
+                    <th className="hrm-att-sticky">Card number</th>
+                    <th className="hrm-att-sticky-2">Name</th>
+                    <th>Role</th>
+                    <th>%</th>
+                    <th className="is-p">P</th>
+                    <th className="is-l">L</th>
+                    <th className="is-a">A</th>
+                    <th className="is-h">H</th>
+                    <th className="is-f">F</th>
+                    {days.map((d) => (
+                      <th key={d}>{String(d).padStart(2, "0")}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthRows.map(({ emp, dayStatuses, counts, pct }) => (
+                    <tr key={emp.id}>
+                      <td className="hrm-att-sticky">
+                        <button
+                          type="button"
+                          className="hrm-card-no"
+                          onClick={() => setEditEmp({ ...emp })}
+                          title="Edit card number"
+                        >
+                          {emp.cardNumber || "—"}
+                        </button>
+                      </td>
+                      <td className="hrm-att-sticky-2">
+                        <div className="ai-cell-user">
+                          <span className="ai-av">{initials(emp.name)}</span>
+                          <div>
+                            <strong>{emp.name}</strong>
+                          </div>
+                        </div>
+                      </td>
+                      <td>{emp.designation || "—"}</td>
+                      <td>
+                        <span
+                          className={`hrm-att-pct ${pct >= 90 ? "ok" : pct >= 70 ? "mid" : "low"}`}
+                        >
+                          {pct}%
+                        </span>
+                      </td>
+                      <td className="is-p">{counts.P}</td>
+                      <td className="is-l">{counts.L}</td>
+                      <td className="is-a">{counts.A}</td>
+                      <td className="is-h">{counts.H}</td>
+                      <td className="is-f">{counts.F}</td>
+                      {days.map((d, i) => (
+                        <td key={d}>
+                          <AttPill
+                            status={dayStatuses[i] || ""}
+                            label={`${emp.name} ${attDate(year, month, d)}`}
+                            onSingle={() =>
+                              hrm.actions.setAttendanceDay(
+                                emp.id,
+                                attDate(year, month, d),
+                                "Present",
+                                { name: emp.name, department: emp.department },
+                              )
+                            }
+                            onDouble={() =>
+                              hrm.actions.setAttendanceDay(
+                                emp.id,
+                                attDate(year, month, d),
+                                "Absent",
+                                { name: emp.name, department: emp.department },
+                              )
+                            }
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : (
+        <>
+          <div className="ai-toolbar">
+            <input
+              className="ai-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name or card…"
+            />
+            <span className="muted">{people.length} employees with office cards</span>
+          </div>
+
+          <div className="hrm-att-card-scan">
+            <label className="hrm-att-field grow">
+              <span>Scan card to mark today ({selectedDate})</span>
+              <input
+                className="field"
+                value={cardScan}
+                onChange={(e) => setCardScan(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    markByCard();
+                  }
+                }}
+                placeholder="Scan / type card number then Enter"
+              />
+            </label>
+            <select
+              className="ai-sort"
+              value={bulkStatus}
+              onChange={(e) => setBulkStatus(e.target.value)}
+            >
+              {ATT_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <button className="btn btn-primary" type="button" onClick={markByCard}>
+              Mark with card
+            </button>
+          </div>
+
+          <section className="rd-table-card hrm-dir-card">
+            <header>
+              <h3>Office cards</h3>
+              <span className="muted">Every employee · click card to edit</span>
+            </header>
+            <div className="ai-table-wrap">
+              <table className="ai-table">
+                <thead>
+                  <tr>
+                    <th>Card number</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Department</th>
+                    <th>Today status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {people.map((emp) => {
+                    const status = byKey.get(`${emp.id}|${selectedDate}`) ?? "";
+                    return (
+                      <tr key={emp.id}>
+                        <td>
+                          <button
+                            type="button"
+                            className="hrm-card-no"
+                            onClick={() => setEditEmp({ ...emp })}
+                            title="Edit card number"
+                          >
+                            {emp.cardNumber || "—"}
+                          </button>
+                        </td>
+                        <td>
+                          <div className="ai-cell-user">
+                            <span className="ai-av">{initials(emp.name)}</span>
+                            <div>
+                              <strong>{emp.name}</strong>
+                            </div>
+                          </div>
+                        </td>
+                        <td>{emp.designation || "—"}</td>
+                        <td>{emp.department}</td>
+                        <td>
+                          <span
+                            className="ai-status on"
+                            style={tone(status || "Pending")}
+                          >
+                            {status || "Not marked"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="rd-row-actions">
+                            <button
+                              type="button"
+                              className="rd-soft ok"
+                              onClick={() => setEditEmp({ ...emp })}
+                            >
+                              Edit card
+                            </button>
+                            <button
+                              type="button"
+                              className="rd-soft ok"
+                              onClick={() => setEmpStatus(emp, "Present")}
+                            >
+                              Present
+                            </button>
+                            <button
+                              type="button"
+                              className="rd-soft bad"
+                              onClick={() => setEmpStatus(emp, "Absent")}
+                            >
+                              Absent
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+
+      {editEmp ? (
+        <HrmEditModal
+          title="Edit office card"
+          onClose={() => setEditEmp(null)}
+          onSubmit={saveCardEdit}
+          submitLabel="Save card"
+        >
+          <HrmField label="Name">
+            <input className="field" value={editEmp.name ?? ""} readOnly />
+          </HrmField>
+          <HrmField label="Role">
+            <input className="field" value={editEmp.designation ?? ""} readOnly />
+          </HrmField>
+          <HrmField label="Office card number">
+            <input
+              className="field"
+              value={editEmp.cardNumber ?? ""}
+              onChange={(e) => setEditEmp((f) => ({ ...f!, cardNumber: e.target.value }))}
+              placeholder="RT9801234"
+              autoFocus
+            />
+          </HrmField>
+        </HrmEditModal>
+      ) : null}
     </PageShell>
   );
 }
@@ -1288,13 +2677,28 @@ export function HrmPerformance({ store }: { store: CrmStore }) {
   const onSave = (e: FormEvent) => {
     e.preventDefault();
     if (!edit?.name?.trim() || !edit?.employeeId) return;
+    const metrics = {
+      quality: Number(edit.metrics?.quality) || 0,
+      delivery: Number(edit.metrics?.delivery) || 0,
+      collaboration: Number(edit.metrics?.collaboration) || 0,
+      ownership: Number(edit.metrics?.ownership) || 0,
+    };
     hrm.actions.upsertPerformance({
       ...edit,
       name: edit.name.trim(),
       employeeId: edit.employeeId,
       score: Number(edit.score) || 0,
+      goalsCompleted: Number(edit.goalsCompleted) || 0,
+      goalsTotal: Number(edit.goalsTotal) || 0,
+      metrics,
+      feedback: edit.feedback ?? "",
     } as HrmPerformance);
     setEdit(null);
+  };
+
+  const setScore = (row: HrmPerformance, score: number) => {
+    const next = Math.min(5, Math.max(0, Number.isFinite(score) ? score : 0));
+    hrm.actions.upsertPerformance({ ...row, score: Number(next.toFixed(1)) });
   };
 
   return (
@@ -1303,7 +2707,7 @@ export function HrmPerformance({ store }: { store: CrmStore }) {
       permission="hr.performance"
       crumb="Performance"
       title="Performance management"
-      lede="Edit ratings or remove review rows."
+      lede="Edit scores, goals, and reviews — or remove a row."
       actions={
         <button
           className="btn btn-primary"
@@ -1316,10 +2720,11 @@ export function HrmPerformance({ store }: { store: CrmStore }) {
               role: "",
               score: 0,
               goalsCompleted: 0,
-              goalsTotal: 0,
+              goalsTotal: 5,
               lastReview: new Date().toISOString().slice(0, 10),
               reviewer: store.currentUser.name,
               potential: "Medium",
+              metrics: { quality: 0, delivery: 0, collaboration: 0, ownership: 0 },
               feedback: "",
             })
           }
@@ -1337,7 +2742,7 @@ export function HrmPerformance({ store }: { store: CrmStore }) {
             <thead>
               <tr>
                 <th>Employee</th>
-                <th>Score</th>
+                <th>Score (0–5)</th>
                 <th>Goals</th>
                 <th>Potential</th>
                 <th>Reviewer</th>
@@ -1352,7 +2757,19 @@ export function HrmPerformance({ store }: { store: CrmStore }) {
                     <div className="muted">{r.role}</div>
                   </td>
                   <td>
-                    <span className="rd-badge ok">{Number(r.score).toFixed(1)}</span>
+                    <div className="hrm-score-edit">
+                      <input
+                        className="field hrm-score-input"
+                        type="number"
+                        min={0}
+                        max={5}
+                        step={0.1}
+                        value={Number(r.score)}
+                        aria-label={`Score for ${r.name}`}
+                        onChange={(e) => setScore(r, Number(e.target.value))}
+                      />
+                      <span className="rd-badge ok">{Number(r.score).toFixed(1)}</span>
+                    </div>
                   </td>
                   <td>
                     {r.goalsCompleted}/{r.goalsTotal}
@@ -1399,13 +2816,98 @@ export function HrmPerformance({ store }: { store: CrmStore }) {
               onChange={(e) => setEdit((f) => ({ ...f!, role: e.target.value }))}
             />
           </HrmField>
-          <HrmField label="Score">
+          <HrmField label="Performance score (0–5)">
             <input
               className="field"
               type="number"
-              step="0.1"
+              min={0}
+              max={5}
+              step={0.1}
               value={edit.score ?? 0}
               onChange={(e) => setEdit((f) => ({ ...f!, score: Number(e.target.value) }))}
+              required
+            />
+          </HrmField>
+          <HrmField label="Goals completed">
+            <input
+              className="field"
+              type="number"
+              min={0}
+              value={edit.goalsCompleted ?? 0}
+              onChange={(e) => setEdit((f) => ({ ...f!, goalsCompleted: Number(e.target.value) }))}
+            />
+          </HrmField>
+          <HrmField label="Goals total">
+            <input
+              className="field"
+              type="number"
+              min={0}
+              value={edit.goalsTotal ?? 0}
+              onChange={(e) => setEdit((f) => ({ ...f!, goalsTotal: Number(e.target.value) }))}
+            />
+          </HrmField>
+          <HrmField label="Quality">
+            <input
+              className="field"
+              type="number"
+              min={0}
+              max={5}
+              step={0.1}
+              value={edit.metrics?.quality ?? 0}
+              onChange={(e) =>
+                setEdit((f) => ({
+                  ...f!,
+                  metrics: { ...(f!.metrics ?? {}), quality: Number(e.target.value) },
+                }))
+              }
+            />
+          </HrmField>
+          <HrmField label="Delivery">
+            <input
+              className="field"
+              type="number"
+              min={0}
+              max={5}
+              step={0.1}
+              value={edit.metrics?.delivery ?? 0}
+              onChange={(e) =>
+                setEdit((f) => ({
+                  ...f!,
+                  metrics: { ...(f!.metrics ?? {}), delivery: Number(e.target.value) },
+                }))
+              }
+            />
+          </HrmField>
+          <HrmField label="Collaboration">
+            <input
+              className="field"
+              type="number"
+              min={0}
+              max={5}
+              step={0.1}
+              value={edit.metrics?.collaboration ?? 0}
+              onChange={(e) =>
+                setEdit((f) => ({
+                  ...f!,
+                  metrics: { ...(f!.metrics ?? {}), collaboration: Number(e.target.value) },
+                }))
+              }
+            />
+          </HrmField>
+          <HrmField label="Ownership">
+            <input
+              className="field"
+              type="number"
+              min={0}
+              max={5}
+              step={0.1}
+              value={edit.metrics?.ownership ?? 0}
+              onChange={(e) =>
+                setEdit((f) => ({
+                  ...f!,
+                  metrics: { ...(f!.metrics ?? {}), ownership: Number(e.target.value) },
+                }))
+              }
             />
           </HrmField>
           <HrmField label="Potential">
@@ -1426,6 +2928,14 @@ export function HrmPerformance({ store }: { store: CrmStore }) {
               className="field"
               value={edit.reviewer ?? ""}
               onChange={(e) => setEdit((f) => ({ ...f!, reviewer: e.target.value }))}
+            />
+          </HrmField>
+          <HrmField label="Feedback">
+            <textarea
+              className="field"
+              rows={3}
+              value={edit.feedback ?? ""}
+              onChange={(e) => setEdit((f) => ({ ...f!, feedback: e.target.value }))}
             />
           </HrmField>
         </HrmEditModal>

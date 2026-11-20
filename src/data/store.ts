@@ -7,6 +7,21 @@ import type {
   SyncLog,
 } from "../types";
 import { can } from "../lib/permissions";
+import {
+  HR_GOOGLE_EMAIL,
+  canOpenHrCrm,
+  decodeGoogleCredential,
+  isHrGoogleEmail,
+  loadAuthProvider,
+  saveAuthProvider,
+  type AuthProvider,
+} from "../lib/hrAuth";
+import {
+  alreadyLoggedGps,
+  clearGpsLogged,
+  markGpsLogged,
+  type CrmOpenLocation,
+} from "../lib/locationTrack";
 import { seedData } from "./seed";
 
 const STORAGE_KEY = "royaltech-crm-v7";
@@ -19,17 +34,86 @@ function loadData(): CrmData {
     const parsed = JSON.parse(raw) as CrmData;
     if (!parsed.users?.length || !parsed.leads) return structuredClone(seedData);
     // Ensure demo passwords exist after upgrades
+    const oldHrEmails = new Set([
+      "hr@ryaltehinno.in",
+      "hr@royaltech.io",
+      "neha@royaltech.io",
+    ]);
     const users = parsed.users.map((user) => {
       const seeded = seedData.users.find((u) => u.id === user.id);
+      const emailLower = String(user.email || "").toLowerCase();
+      const isHrAccount =
+        user.id === "u2" ||
+        user.role === "hr_admin" ||
+        oldHrEmails.has(emailLower) ||
+        emailLower === HR_GOOGLE_EMAIL;
+      const renamedHr = isHrAccount
+        ? {
+            name: "Vaishnavi Arora",
+            avatarInitials: "VA",
+            email: HR_GOOGLE_EMAIL,
+            role: "hr_admin" as const,
+            department: user.department || "HR",
+          }
+        : null;
       return {
         ...user,
+        ...renamedHr,
         password: user.password || seeded?.password || "royaltech123",
       };
     });
+    const notifications = (parsed.notifications || seedData.notifications).filter(
+      (n) =>
+        n.id !== "n1" &&
+        n.id !== "n2" &&
+        n.id !== "n4" &&
+        n.id !== "n5" &&
+        !(
+          String(n.title || "").toLowerCase().includes("leave approval") &&
+          String(n.body || "").toLowerCase().includes("sara khan")
+        ) &&
+        !(
+          String(n.title || "").toLowerCase().includes("code review requested") ||
+          String(n.body || "").toLowerCase().includes("inventory sync pr")
+        ) &&
+        !(
+          String(n.title || "").toLowerCase().includes("daily report reminder") ||
+          String(n.body || "").toLowerCase().includes("standup before")
+        ) &&
+        !(
+          String(n.title || "").toLowerCase().includes("follow-up due") ||
+          String(n.body || "").toLowerCase().includes("amelia hart follow-up")
+        ),
+    );
+    const projects = (parsed.projects || seedData.projects).map((project) => {
+      const seeded = seedData.projects.find((p) => p.id === project.id);
+      return {
+        ...seeded,
+        ...project,
+        description: project.description ?? seeded?.description,
+        workflow: project.workflow ?? seeded?.workflow,
+        flowLink: project.flowLink ?? seeded?.flowLink,
+        notes: project.notes ?? seeded?.notes,
+      };
+    });
+    const existingTaskIds = new Set((parsed.tasks || []).map((t) => t.id));
+    const tasks = [
+      ...(parsed.tasks || seedData.tasks),
+      ...seedData.tasks.filter((t) => !existingTaskIds.has(t.id)),
+    ];
+    const existingReportIds = new Set((parsed.dailyReports || []).map((r) => r.id));
+    const dailyReports = [
+      ...(parsed.dailyReports || seedData.dailyReports || []),
+      ...seedData.dailyReports.filter((r) => !existingReportIds.has(r.id)),
+    ];
     return {
       ...structuredClone(seedData),
       ...parsed,
       users,
+      projects,
+      tasks,
+      dailyReports,
+      notifications,
       organization: parsed.organization ?? seedData.organization,
     };
   } catch {
@@ -65,6 +149,7 @@ function nextLeadId(leads: Lead[]) {
 export function useCrmStore() {
   const [data, setData] = useState<CrmData>(() => loadData());
   const [sessionUserId, setSessionUserId] = useState<string | null>(() => loadSession());
+  const [authProvider, setAuthProvider] = useState<AuthProvider | null>(() => loadAuthProvider());
 
   useEffect(() => {
     saveData(data);
@@ -80,22 +165,43 @@ export function useCrmStore() {
   );
 
   const role = currentUser.role;
+  const hrCrmOpen = canOpenHrCrm({
+    email: currentUser.email,
+    role: currentUser.role,
+    authProvider,
+  });
 
   const login = useCallback(
     (email: string, password: string) => {
+      const emailNorm = email.trim().toLowerCase();
       const user = data.users.find(
         (u) =>
-          u.email.toLowerCase() === email.trim().toLowerCase() &&
+          u.email.toLowerCase() === emailNorm &&
           u.password === password,
       );
       if (!user) {
         return { ok: false as const, error: "Invalid email or password." };
       }
+      // Password login for now; Google Sign-In UI can be re-enabled later.
+      // HR still must use the official HR mailbox email.
+      if (user.role === "hr_admin" && !isHrGoogleEmail(emailNorm)) {
+        return {
+          ok: false as const,
+          error: `HR login must use ${HR_GOOGLE_EMAIL}.`,
+        };
+      }
+      setAuthProvider("password");
+      saveAuthProvider("password");
       setSessionUserId(user.id);
       saveSession(user.id);
       setData((prev) => ({
         ...prev,
         currentUserId: user.id,
+        users: prev.users.map((u) =>
+          u.id === user.id && user.role === "hr_admin"
+            ? { ...u, email: HR_GOOGLE_EMAIL }
+            : u,
+        ),
         activityLogs: [
           {
             id: uid("log"),
@@ -112,34 +218,217 @@ export function useCrmStore() {
     [data.users],
   );
 
+  const loginWithGoogle = useCallback(
+    (credential: string) => {
+      const profile = decodeGoogleCredential(credential);
+      const emailNorm = String(profile.email || "")
+        .trim()
+        .toLowerCase();
+      if (!emailNorm) {
+        return { ok: false as const, error: "Google did not return an email address." };
+      }
+      if (profile.email_verified === false) {
+        return {
+          ok: false as const,
+          error: "Please use a verified Google account.",
+        };
+      }
+
+      // HR CRM: only the official HR Google mailbox.
+      if (isHrGoogleEmail(emailNorm)) {
+        const hrUser = data.users.find(
+          (u) => u.role === "hr_admin" || isHrGoogleEmail(u.email),
+        );
+        if (!hrUser) {
+          return { ok: false as const, error: "HR account is not configured." };
+        }
+        setAuthProvider("google");
+        saveAuthProvider("google");
+        setSessionUserId(hrUser.id);
+        saveSession(hrUser.id);
+        setData((prev) => ({
+          ...prev,
+          currentUserId: hrUser.id,
+          users: prev.users.map((u) =>
+            u.id === hrUser.id
+              ? {
+                  ...u,
+                  email: HR_GOOGLE_EMAIL,
+                  name: profile.name?.trim() || u.name,
+                  avatarUrl: profile.picture || u.avatarUrl,
+                  role: "hr_admin" as const,
+                }
+              : u,
+          ),
+          activityLogs: [
+            {
+              id: uid("log"),
+              actorId: hrUser.id,
+              action: `Google Sign-In as HR (${HR_GOOGLE_EMAIL})`,
+              entity: "Session",
+              createdAt: new Date().toISOString(),
+            },
+            ...prev.activityLogs,
+          ],
+        }));
+        return { ok: true as const, user: hrUser };
+      }
+
+      // Everyone else: Google email must match a CRM user account.
+      const user = data.users.find((u) => u.email.toLowerCase() === emailNorm);
+      if (!user) {
+        return {
+          ok: false as const,
+          error: `No CRM account for ${emailNorm}. Ask admin to add this Google email, or use your registered login email.`,
+        };
+      }
+      if (user.role === "hr_admin") {
+        return {
+          ok: false as const,
+          error: `HR CRM opens only with Google as ${HR_GOOGLE_EMAIL}.`,
+        };
+      }
+
+      setAuthProvider("google");
+      saveAuthProvider("google");
+      setSessionUserId(user.id);
+      saveSession(user.id);
+      setData((prev) => ({
+        ...prev,
+        currentUserId: user.id,
+        users: prev.users.map((u) =>
+          u.id === user.id
+            ? {
+                ...u,
+                name: profile.name?.trim() || u.name,
+                avatarUrl: profile.picture || u.avatarUrl,
+              }
+            : u,
+        ),
+        activityLogs: [
+          {
+            id: uid("log"),
+            actorId: user.id,
+            action: `Google Sign-In as ${user.role} (${emailNorm})`,
+            entity: "Session",
+            createdAt: new Date().toISOString(),
+          },
+          ...prev.activityLogs,
+        ],
+      }));
+      return { ok: true as const, user };
+    },
+    [data.users],
+  );
+
   const logout = useCallback(() => {
+    clearGpsLogged(sessionUserId);
     setSessionUserId(null);
     saveSession(null);
-  }, []);
+    setAuthProvider(null);
+    saveAuthProvider(null);
+    try {
+      window.google?.accounts?.id?.disableAutoSelect?.();
+    } catch {
+      /* ignore */
+    }
+  }, [sessionUserId]);
+
+  const recordCrmOpenLocation = useCallback((location: CrmOpenLocation) => {
+    setData((prev) => {
+      const userId = sessionUserId || prev.currentUserId;
+      if (!userId || alreadyLoggedGps(userId)) return prev;
+      markGpsLogged(userId);
+      const place =
+        location.label ||
+        `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+      return {
+        ...prev,
+        activityLogs: [
+          {
+            id: uid("log"),
+            actorId: userId,
+            action: `Opened CRM from ${place}`,
+            entity: "GPS Tracker",
+            createdAt: location.capturedAt || new Date().toISOString(),
+            lat: location.lat,
+            lng: location.lng,
+            locationLabel: location.label,
+            mapsUrl: location.mapsUrl,
+            accuracyM: location.accuracy,
+          },
+          ...prev.activityLogs,
+        ],
+      };
+    });
+    return { ok: true as const };
+  }, [sessionUserId]);
 
   const updateCurrentUser = useCallback(
-    (patch: Partial<{ name: string; email: string; department: string; password: string }>) => {
+    (
+      patch: Partial<{
+        name: string;
+        email: string;
+        department: string;
+        password: string;
+        avatarUrl: string | null;
+      }>,
+    ) => {
       setData((prev) => {
         const userId = sessionUserId || prev.currentUserId;
         const next = {
           ...prev,
-          users: prev.users.map((u) =>
-            u.id === userId
-              ? {
-                  ...u,
-                  name: patch.name?.trim() || u.name,
-                  email: patch.email?.trim() || u.email,
-                  department: patch.department?.trim() || u.department,
-                  password: patch.password?.trim() || u.password,
-                }
-              : u,
-          ),
+          users: prev.users.map((u) => {
+            if (u.id !== userId) return u;
+            const name = patch.name?.trim() || u.name;
+            const initials = name
+              .split(/\s+/)
+              .filter(Boolean)
+              .slice(0, 2)
+              .map((p) => p[0]?.toUpperCase() ?? "")
+              .join("");
+            const nextEmail =
+              u.role === "hr_admin"
+                ? HR_GOOGLE_EMAIL
+                : patch.email?.trim() || u.email;
+            return {
+              ...u,
+              name,
+              email: nextEmail,
+              department: patch.department?.trim() || u.department,
+              password: patch.password?.trim() || u.password,
+              avatarInitials: initials || u.avatarInitials,
+              avatarUrl:
+                patch.avatarUrl === null
+                  ? undefined
+                  : patch.avatarUrl !== undefined
+                    ? patch.avatarUrl
+                    : u.avatarUrl,
+            };
+          }),
         };
         saveData(next);
         return next;
       });
     },
     [sessionUserId],
+  );
+
+  const changeCurrentPassword = useCallback(
+    (currentPassword: string, newPassword: string) => {
+      const userId = sessionUserId || data.currentUserId;
+      const user = data.users.find((u) => u.id === userId);
+      if (!user) return { ok: false as const, error: "User not found." };
+      if (user.password !== currentPassword) {
+        return { ok: false as const, error: "Current password is incorrect." };
+      }
+      if (newPassword.trim().length < 6) {
+        return { ok: false as const, error: "New password must be at least 6 characters." };
+      }
+      updateCurrentUser({ password: newPassword.trim() });
+      return { ok: true as const };
+    },
+    [data.currentUserId, data.users, sessionUserId, updateCurrentUser],
   );
 
   const createOrganization = useCallback(
@@ -540,7 +829,11 @@ export function useCrmStore() {
       }
 
       const managerId = input.managerId ?? currentUser.id;
-      const id = input.id?.trim() || uid("u");
+      let id = (input.id?.trim() || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+      if (id && data.users.some((u) => u.id === id)) {
+        return { ok: false as const, error: "This developer ID is already taken." };
+      }
+      if (!id) id = uid("u");
       const initials = name
         .split(/\s+/)
         .filter(Boolean)
@@ -615,6 +908,10 @@ export function useCrmStore() {
       managerId?: string;
       progress?: number;
       id?: string;
+      description?: string;
+      workflow?: string;
+      flowLink?: string;
+      notes?: string;
     }) => {
       const name = input.name.trim();
       const deadline = input.deadline.trim();
@@ -623,6 +920,10 @@ export function useCrmStore() {
       }
       const id = input.id?.trim() || uid("pr");
       const managerId = input.managerId ?? currentUser.id;
+      const description = input.description?.trim() || undefined;
+      const workflow = input.workflow?.trim() || undefined;
+      const flowLink = input.flowLink?.trim() || undefined;
+      const notes = input.notes?.trim() || undefined;
       setData((prev) => ({
         ...prev,
         projects: [
@@ -635,6 +936,10 @@ export function useCrmStore() {
             progress: input.progress ?? 0,
             deadline,
             budget: Number(input.budget) || 0,
+            description,
+            workflow,
+            flowLink,
+            notes,
           },
           ...prev.projects,
         ],
@@ -760,6 +1065,115 @@ export function useCrmStore() {
     [data.tasks, data.users],
   );
 
+  const visibleDailyReports = useMemo(() => {
+    const rows = data.dailyReports || [];
+    if (role === "developer") {
+      return rows.filter((r) => r.developerId === currentUser.id);
+    }
+    if (role === "project_manager") {
+      return rows.filter(
+        (r) =>
+          r.managerId === currentUser.id ||
+          data.users.some(
+            (u) =>
+              u.id === r.developerId &&
+              u.role === "developer" &&
+              u.managerId === currentUser.id,
+          ),
+      );
+    }
+    if (role === "founder") return rows;
+    return [];
+  }, [currentUser.id, data.dailyReports, data.users, role]);
+
+  const submitDailyReport = useCallback(
+    (input: {
+      description: string;
+      workStatus: "In Progress" | "Completed" | "Blocked";
+      hours: number;
+      tasksCompleted?: number;
+      attachmentName?: string;
+      date?: string;
+    }) => {
+      const description = input.description.trim();
+      if (!description) {
+        return { ok: false as const, error: "Please describe what you worked on today." };
+      }
+      if (role !== "developer") {
+        return { ok: false as const, error: "Only developers can submit daily reports." };
+      }
+      const managerId =
+        currentUser.managerId ||
+        data.users.find((u) => u.role === "project_manager")?.id ||
+        "";
+      if (!managerId) {
+        return { ok: false as const, error: "No project manager is linked to your account." };
+      }
+      const hours = Number(input.hours) || 0;
+      if (hours <= 0) {
+        return { ok: false as const, error: "Hours must be greater than 0." };
+      }
+      const date = (input.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+      const tasksCompleted =
+        input.tasksCompleted ??
+        data.tasks.filter(
+          (t) => t.assigneeId === currentUser.id && t.status === "done",
+        ).length;
+      const id = uid("dr");
+      const createdAt = new Date().toISOString();
+      const manager = data.users.find((u) => u.id === managerId);
+
+      setData((prev) => ({
+        ...prev,
+        dailyReports: [
+          {
+            id,
+            developerId: currentUser.id,
+            managerId,
+            date,
+            description,
+            workStatus: input.workStatus,
+            hours,
+            tasksCompleted,
+            attachmentName: input.attachmentName?.trim() || undefined,
+            createdAt,
+            status: "Submitted",
+          },
+          ...(prev.dailyReports || []),
+        ],
+        activityLogs: [
+          {
+            id: uid("log"),
+            actorId: prev.currentUserId,
+            action: `Submitted daily report to ${manager?.name ?? "manager"}`,
+            entity: "Daily Report",
+            createdAt,
+          },
+          ...prev.activityLogs,
+        ],
+        notifications: [
+          {
+            id: uid("n"),
+            title: "Daily report received",
+            body: `${currentUser.name} submitted today’s report (${input.workStatus}, ${hours}h).`,
+            createdAt,
+            read: false,
+            audienceRoles: ["project_manager"],
+            audienceUserIds: [managerId],
+          },
+          ...prev.notifications,
+        ],
+      }));
+
+      return {
+        ok: true as const,
+        reportId: id,
+        managerName: manager?.name ?? "Project Manager",
+      };
+    },
+    [currentUser.id, currentUser.managerId, currentUser.name, data.tasks, data.users, role],
+  );
+
   const decideApproval = useCallback(
     (id: string, status: "approved" | "rejected") => {
       setData((prev) => {
@@ -807,9 +1221,29 @@ export function useCrmStore() {
   }, []);
 
   const allow = useCallback(
-    (permission: Parameters<typeof can>[1]) =>
-      isAuthenticated ? can(role, permission) : false,
-    [isAuthenticated, role],
+    (permission: Parameters<typeof can>[1]) => {
+      if (!isAuthenticated) return false;
+      // HR module unlocks only after Google Sign-In as the official HR mailbox.
+      if (permission === "hr" || String(permission).startsWith("hr.")) {
+        return canOpenHrCrm({
+          email: currentUser.email,
+          role,
+          authProvider,
+        });
+      }
+      if (
+        (permission === "salary.view" || permission === "confidential.docs") &&
+        role === "hr_admin"
+      ) {
+        return canOpenHrCrm({
+          email: currentUser.email,
+          role,
+          authProvider,
+        });
+      }
+      return can(role, permission);
+    },
+    [authProvider, currentUser.email, isAuthenticated, role],
   );
 
   return {
@@ -817,14 +1251,20 @@ export function useCrmStore() {
     currentUser,
     role,
     isAuthenticated,
+    authProvider,
+    hrCrmOpen,
     allow,
     visibleLeads,
     visibleTasks,
     visibleProjects,
+    visibleDailyReports,
     teamDevelopers,
     login,
+    loginWithGoogle,
     logout,
+    recordCrmOpenLocation,
     updateCurrentUser,
+    changeCurrentPassword,
     createOrganization,
     addLead,
     updateLead,
@@ -836,6 +1276,7 @@ export function useCrmStore() {
     createProject,
     createTask,
     assignTask,
+    submitDailyReport,
     decideApproval,
     markNotificationRead,
     resetData,

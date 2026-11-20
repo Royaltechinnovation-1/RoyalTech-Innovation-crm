@@ -23,7 +23,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 INSERT INTO users (id, name, email, role, department, avatar_initials, manager_id) VALUES
 ('u1', 'Aryan Mehta', 'aryan@royaltech.io', 'founder', 'Super Admin', 'AM', NULL),
-('u2', 'Neha Kapoor', 'hr@ryaltehinno.in', 'hr_admin', 'HR', 'NK', NULL),
+('u2', 'Vaishnavi Arora', 'hr@royaltechinnovation.co.in', 'hr_admin', 'HR', 'VA', NULL),
 ('u3', 'Rahul Verma', 'rahul@royaltech.io', 'sales_manager', 'Sales', 'RV', NULL),
 ('u4', 'Sara Khan', 'sara@royaltech.io', 'sales_executive', 'Sales', 'SK', 'u3'),
 ('u5', 'Vikram Shah', 'vikram@royaltech.io', 'project_manager', 'Delivery', 'VS', NULL),
@@ -96,7 +96,7 @@ INSERT INTO sales_activities (id, lead_id, owner_id, activity_type, title, activ
 ('a8', 'l14', 'u9', 'call', 'Deal won — Plainfield Labs starter pack', '2026-11-04');
 
 INSERT INTO employees (id, name, email, role_title, department, status, join_date, salary, manager_id) VALUES
-('e1', 'Neha Kapoor', 'hr@ryaltehinno.in', 'HR Admin', 'HR', 'active', '2023-03-01', 92000, NULL),
+('e1', 'Vaishnavi Arora', 'hr@royaltechinnovation.co.in', 'HR Admin', 'HR', 'active', '2023-03-01', 92000, NULL),
 ('e2', 'Rahul Verma', 'rahul@royaltech.io', 'Sales Manager', 'Sales', 'active', '2022-08-15', 110000, NULL),
 ('e3', 'Sara Khan', 'sara@royaltech.io', 'Sales Executive', 'Sales', 'active', '2024-01-10', 68000, 'e2'),
 ('e4', 'Vikram Shah', 'vikram@royaltech.io', 'Project Manager', 'Delivery', 'active', '2021-11-02', 105000, NULL),

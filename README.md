@@ -25,15 +25,30 @@ If MySQL/MariaDB is offline, the API falls back to an in-memory store automatica
 | Role | Email | Password |
 | --- | --- | --- |
 | Super Admin (Founder) | aryan@royaltech.io | founder123 |
-| HR Admin | neha@royaltech.io | hr123 |
-| Sales Manager | rahul@royaltech.io | sales123 |
-| Sales Executive | sara@royaltech.io | exec123 |
-| Project Manager | vikram@royaltech.io | pm123 |
-| Developer | ananya@royaltech.io | dev123 |
-| Website Admin | omar@royaltech.io | web123 |
-| Finance Admin | meera@royaltech.io | finance123 |
+| HR Admin | Google only: hr@royaltechinnovation.co.in | Sign in with Google |
+| Sales Manager | rahul@royaltech.io | Google or sales123 |
+| Sales Executive | sara@royaltech.io | Google or exec123 |
+| Project Manager | vikram@royaltech.io | Google or pm123 |
+| Developer | ananya@royaltech.io | Google or dev123 |
+| Website Admin | omar@royaltech.io | Google or web123 |
+| Finance Admin | meera@royaltech.io | Google or finance123 |
 
-Each login opens that role’s own dashboard and menu. Use **Log out** to switch users.
+### Google Client ID (each CRM adds its own)
+
+If you set up CRM for **another person / another company**, they must create **their own** Google Client ID and put it in **their** `.env`. Do not copy someone else’s Client ID.
+
+1. That person opens [Google Cloud Console](https://console.cloud.google.com/) → new project  
+2. **OAuth consent screen** → add their team emails as Test users  
+3. **Credentials** → **OAuth client ID** (Web) → copy Client ID  
+4. In their project `.env` add:
+
+```env
+VITE_GOOGLE_CLIENT_ID=their-own-client-id.apps.googleusercontent.com
+```
+
+5. Restart the app (`npm run dev`)
+
+**Sign-in rules:** each user signs in with Google using the email registered in CRM. HR opens only with that CRM’s HR Google mailbox (here: `hr@royaltechinnovation.co.in`).
 
 ## Key features
 

@@ -9,17 +9,16 @@ export const payrollMonths = [
 const paidThrough = { "2026-11": 21, "2026-10": 26, "2026-09": 26 };
 
 function buildRecord(employee, index, month) {
-  const basic = Math.round(employee.salary * 0.5);
-  const hra = Math.round(employee.salary * 0.2);
-  const special = Math.round(employee.salary * 0.18);
-  const transport = Math.round(employee.salary * 0.12);
-  const allowances = hra + special + transport;
-  const pf = Math.round(basic * 0.12);
-  const tax = Math.round(employee.salary * 0.1);
-  const insurance = 1200;
-  const deductions = pf + tax + insurance;
-  const net = employee.salary - deductions;
+  // RoyalTech roster: salaries are in-hand with no deduction
+  const gross = employee.salary || 0;
+  const basic = gross;
+  const allowances = 0;
+  const deductions = 0;
+  const net = gross;
   const paid = index < paidThrough[month];
+  const pan =
+    employee.documents?.panNumber ||
+    (employee.documents?.pan === "Yes" ? "On file" : "");
 
   return {
     id: `${month}-${employee.id}`,
@@ -31,13 +30,14 @@ function buildRecord(employee, index, month) {
     basic,
     allowances,
     deductions,
-    gross: employee.salary,
+    gross,
     net,
     status: paid ? "Paid" : "Pending",
     paymentDate: paid ? `${month}-28` : "",
     processedOn: paid ? `${month}-26` : "",
-    bank: `HDFC **** ${String(4200 + index).slice(-4)}`,
-    pan: `ABCDE${1000 + index}F`,
+    bank: employee.documents?.bankDetails === "Yes" ? "On file" : "Pending",
+    pan,
+    notes: employee.salaryNotes || "IN Hand no deduction",
   };
 }
 
@@ -50,18 +50,20 @@ export const payrollByMonth = payrollMonths.reduce((accumulator, month) => {
 
 export const payrollRecords = payrollByMonth["2026-11"];
 
+const novPayroll = employees.reduce((s, e) => s + (e.salary || 0), 0);
+
 export const payrollTrend = [
-  { month: "Jun", payroll: 2780000, headcount: 24 },
-  { month: "Jul", payroll: 2815000, headcount: 24 },
-  { month: "Aug", payroll: 2890000, headcount: 25 },
-  { month: "Sep", payroll: 2945000, headcount: 25 },
-  { month: "Oct", payroll: 3010000, headcount: 26 },
-  { month: "Nov", payroll: 3074000, headcount: 26 },
+  { month: "Jun", payroll: 180000, headcount: 6 },
+  { month: "Jul", payroll: 195000, headcount: 7 },
+  { month: "Aug", payroll: 210000, headcount: 8 },
+  { month: "Sep", payroll: 220000, headcount: 9 },
+  { month: "Oct", payroll: 230000, headcount: 10 },
+  { month: "Nov", payroll: novPayroll, headcount: employees.length },
 ];
 
 export const payrollBreakdown = [
-  { name: "Basic salary", value: 52, color: "#25352B" },
-  { name: "Allowances", value: 34, color: "#647765" },
-  { name: "Statutory", value: 9, color: "#C2A878" },
-  { name: "Other deductions", value: 5, color: "#B9A48A" },
+  { name: "In-hand salary", value: 100, color: "#4b7bf5" },
+  { name: "Allowances", value: 0, color: "#647765" },
+  { name: "Statutory", value: 0, color: "#C2A878" },
+  { name: "Other deductions", value: 0, color: "#B9A48A" },
 ];

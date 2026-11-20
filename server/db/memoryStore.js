@@ -8,10 +8,11 @@ import {
   getFileSettings,
   saveFileSettings,
 } from "./settingsStore.js";
+import * as mailService from "../mailService.js";
 
 const users = [
   { id: "u1", name: "Aryan Mehta", email: "aryan@royaltech.io", role: "founder", department: "Super Admin", avatar_initials: "AM", manager_id: null },
-  { id: "u2", name: "Neha Kapoor", email: "hr@ryaltehinno.in", role: "hr_admin", department: "HR", avatar_initials: "NK", manager_id: null },
+  { id: "u2", name: "Vaishnavi Arora", email: "hr@royaltechinnovation.co.in", role: "hr_admin", department: "HR", avatar_initials: "VA", manager_id: null },
   { id: "u3", name: "Rahul Verma", email: "rahul@royaltech.io", role: "sales_manager", department: "Sales", avatar_initials: "RV", manager_id: null },
   { id: "u4", name: "Sara Khan", email: "sara@royaltech.io", role: "sales_executive", department: "Sales", avatar_initials: "SK", manager_id: "u3" },
   { id: "u5", name: "Vikram Shah", email: "vikram@royaltech.io", role: "project_manager", department: "Delivery", avatar_initials: "VS", manager_id: null },
@@ -234,7 +235,7 @@ export function getSalesReports() {
 }
 
 const employees = [
-  { id: "e1", name: "Neha Kapoor", email: "hr@ryaltehinno.in", role_title: "HR Admin", department: "HR", status: "active", join_date: "2023-03-01", salary: 92000 },
+  { id: "e1", name: "Vaishnavi Arora", email: "hr@royaltechinnovation.co.in", role_title: "HR Admin", department: "HR", status: "active", join_date: "2023-03-01", salary: 92000 },
   { id: "e2", name: "Rahul Verma", email: "rahul@royaltech.io", role_title: "Sales Manager", department: "Sales", status: "active", join_date: "2022-08-15", salary: 110000 },
   { id: "e3", name: "Sara Khan", email: "sara@royaltech.io", role_title: "Sales Executive", department: "Sales", status: "active", join_date: "2024-01-10", salary: 68000, manager_id: "e2" },
   { id: "e4", name: "Vikram Shah", email: "vikram@royaltech.io", role_title: "Project Manager", department: "Delivery", status: "active", join_date: "2021-11-02", salary: 105000 },
@@ -440,17 +441,13 @@ function mapProposalMemory(row) {
 }
 
 export function getMailStatus() {
-  const envReady = Boolean(process.env.MAIL_SMTP_HOST && process.env.MAIL_FROM);
-  const connected = Boolean(mailConfig.enabled) || envReady;
-  return {
-    mode: "memory",
-    connected,
-    provider: mailConfig.provider || (envReady ? "smtp" : "none"),
-    fromEmail: mailConfig.from_email || process.env.MAIL_FROM || null,
-    message: connected
-      ? "Mail connected — proposals can be sent from CRM."
-      : "Mail not connected yet. Review and queue sends here; connect SMTP later.",
-  };
+  const status = mailService.getMailStatus();
+  // keep legacy flag in sync for older callers
+  mailConfig.enabled = status.connected ? 1 : 0;
+  mailConfig.from_email = status.fromEmail || mailConfig.from_email;
+  mailConfig.provider = status.provider;
+  mailConfig.connected_at = status.connected ? new Date().toISOString() : null;
+  return status;
 }
 
 export function getProposals() {
@@ -502,12 +499,11 @@ export function updateProposalStatus(id, status) {
   return { mode: "memory", proposal: mapProposalMemory(row) };
 }
 
-export function sendProposalMail(id, input = {}) {
+export async function sendProposalMail(id, input = {}) {
   const row = proposals.find((p) => p.id === id || p.proposal_code === id);
   if (!row) throw new Error("Proposal not found");
   const lead = leads.find((l) => l.id === row.lead_id);
   if (!lead) throw new Error("Linked lead not found");
-  const mail = getMailStatus();
   const to = String(input.to || lead.email || "").trim();
   const subject = String(input.subject || `${row.title} (${row.proposal_code})`).trim();
   const message = String(
@@ -516,22 +512,21 @@ export function sendProposalMail(id, input = {}) {
       `Dear ${lead.name},\n\nPlease find our proposal ${row.proposal_code}.\n\nRegards,\nRoyalTech Sales`,
   ).trim();
   if (!to) throw new Error("Recipient email is required");
-  const log = {
-    id: `pml_${Date.now().toString(36)}`,
+  const result = await mailService.sendMail({
     to,
     subject,
-    status: mail.connected ? "sent" : "queued",
-    message: mail.connected ? `Sent to ${to}` : `Queued for ${to} — connect mail later to deliver`,
-  };
-  proposalMailLogs.unshift(log);
+    text: message,
+    accountKind: input.accountKind,
+  });
+  proposalMailLogs.unshift(result.log);
   row.status = "sent";
   row.last_sent_at = new Date().toISOString();
   return {
     mode: "memory",
-    mailed: mail.connected,
-    queued: !mail.connected,
-    mail,
-    log,
+    mailed: result.mailed,
+    queued: result.queued,
+    mail: result.mail,
+    log: result.log,
     preview: { to, subject, message },
     proposal: mapProposalMemory(row),
   };

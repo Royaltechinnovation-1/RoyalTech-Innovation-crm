@@ -1,9 +1,15 @@
+import { Navigate } from "react-router-dom";
 import type { CrmStore } from "../data/store";
 import { formatCurrency } from "../lib/format";
 import { PageHeader, Widget } from "../components/ui";
 import { RequirePermission } from "../components/RequirePermission";
 
 export function Reports({ store }: { store: CrmStore }) {
+  const role = String(store.currentUser.role ?? "").toLowerCase();
+  if (role.includes("hr") && store.hrCrmOpen) {
+    return <Navigate to="/hr/reports" replace />;
+  }
+
   return (
     <RequirePermission store={store} permission="reports">
       <div className="page">

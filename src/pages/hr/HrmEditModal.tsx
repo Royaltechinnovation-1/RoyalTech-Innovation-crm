@@ -15,16 +15,28 @@ export function HrmEditModal({
 }) {
   return (
     <div className="ai-modal-backdrop" role="presentation" onClick={onClose}>
-      <div className="ai-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="ai-modal hrm-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
         <header>
           <h3>{title}</h3>
-          <button className="ai-menu" type="button" onClick={onClose}>
+          <button className="ai-menu" type="button" onClick={onClose} aria-label="Close">
             ×
           </button>
         </header>
-        <form className="form-grid" onSubmit={onSubmit}>
-          {children}
-          <div className="form-actions">
+        <form
+          className="form-grid hrm-edit-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit(e);
+          }}
+          noValidate
+        >
+          <div className="hrm-edit-body">{children}</div>
+          <div className="form-actions hrm-edit-actions">
             <button className="btn btn-secondary" type="button" onClick={onClose}>
               Cancel
             </button>

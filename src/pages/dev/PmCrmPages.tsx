@@ -8,8 +8,11 @@ import {
   createDeveloperApi,
   createDevTaskApi,
 } from "../../lib/moduleApi";
-import { Field, Input, Select } from "../../components/ui";
+import { Field, Input, Select, Textarea } from "../../components/ui";
 import { RequirePermission } from "../../components/RequirePermission";
+
+const DEFAULT_WORKFLOW =
+  "Brief → Plan → Assign team → Build sprints → QA → Milestone review → Launch → Hypercare";
 
 function statusTone(status: string) {
   if (status === "done" || status === "completed" || status === "active") {
@@ -58,15 +61,24 @@ export function PmProjects({ store }: { store: CrmStore }) {
   const [toast, setToast] = useState("");
   const [form, setForm] = useState({
     name: "",
+    description: "",
+    workflow: DEFAULT_WORKFLOW,
+    flowLink: "",
+    notes: "",
     deadline: new Date().toISOString().slice(0, 10),
-    budget: "0",
     status: "planned" as ProjectStatus,
   });
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return projects
-      .filter((p) => !q || `${p.name} ${p.status}`.toLowerCase().includes(q))
+      .filter(
+        (p) =>
+          !q ||
+          `${p.name} ${p.status} ${p.description ?? ""} ${p.workflow ?? ""}`
+            .toLowerCase()
+            .includes(q),
+      )
       .map((p) => {
         const open = tasks.filter((t) => t.projectId === p.id && t.status !== "done").length;
         const done = tasks.filter((t) => t.projectId === p.id && t.status === "done").length;
@@ -80,8 +92,11 @@ export function PmProjects({ store }: { store: CrmStore }) {
     setErr("");
     const res = store.createProject({
       name: form.name,
+      description: form.description,
+      workflow: form.workflow,
+      flowLink: form.flowLink,
+      notes: form.notes,
       deadline: form.deadline,
-      budget: Number(form.budget) || 0,
       status: form.status,
       managerId: store.currentUser.id,
     });
@@ -92,8 +107,11 @@ export function PmProjects({ store }: { store: CrmStore }) {
     setToast(`Project “${form.name}” created`);
     setForm({
       name: "",
+      description: "",
+      workflow: DEFAULT_WORKFLOW,
+      flowLink: "",
+      notes: "",
       deadline: new Date().toISOString().slice(0, 10),
-      budget: "0",
       status: "planned",
     });
     setModal(false);
@@ -194,6 +212,15 @@ export function PmProjects({ store }: { store: CrmStore }) {
                     </td>
                     <td>
                       <strong>{project.name}</strong>
+                      {project.description ? (
+                        <p className="list-sub pm-project-desc">{project.description}</p>
+                      ) : null}
+                      {project.workflow ? (
+                        <p className="pm-project-flow muted">{project.workflow}</p>
+                      ) : null}
+                      {project.notes ? (
+                        <p className="pm-project-notes muted">{project.notes}</p>
+                      ) : null}
                     </td>
                     <td>{client?.company ?? "—"}</td>
                     <td style={{ minWidth: 140 }}>
@@ -212,9 +239,27 @@ export function PmProjects({ store }: { store: CrmStore }) {
                       </span>
                     </td>
                     <td>
-                      <Link className="btn btn-secondary" to="/projects/tasks">
-                        Tasks
-                      </Link>
+                      <div className="rd-row-actions">
+                        {project.flowLink ? (
+                          project.flowLink.startsWith("/") ? (
+                            <Link className="btn btn-secondary" to={project.flowLink}>
+                              Open link
+                            </Link>
+                          ) : (
+                            <a
+                              className="btn btn-secondary"
+                              href={project.flowLink}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open link
+                            </a>
+                          )
+                        ) : null}
+                        <Link className="btn btn-secondary" to="/projects/tasks">
+                          Tasks
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -231,56 +276,101 @@ export function PmProjects({ store }: { store: CrmStore }) {
         </section>
 
         {modal ? (
-          <Modal title="Create project" onClose={() => setModal(false)}>
-            <form className="form-grid" onSubmit={onCreate}>
-              <Field label="Project name">
-                <Input
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Client Portal Refresh"
-                  required
-                />
-              </Field>
-              <Field label="Deadline">
-                <Input
-                  type="date"
-                  value={form.deadline}
-                  onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))}
-                  required
-                />
-              </Field>
-              <Field label="Budget">
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.budget}
-                  onChange={(e) => setForm((f) => ({ ...f, budget: e.target.value }))}
-                />
-              </Field>
-              <Field label="Status">
-                <Select
-                  value={form.status}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, status: e.target.value as ProjectStatus }))
-                  }
-                >
-                  <option value="planned">Planned</option>
-                  <option value="active">Active</option>
-                  <option value="on_hold">On hold</option>
-                  <option value="completed">Completed</option>
-                </Select>
-              </Field>
-              <div className="form-actions">
-                <button className="btn btn-secondary" type="button" onClick={() => setModal(false)}>
-                  Cancel
+          <div className="ai-modal-backdrop" role="presentation" onClick={() => setModal(false)}>
+            <div
+              className="ai-modal pm-create-modal"
+              role="dialog"
+              aria-modal="true"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <header>
+                <h3>Create project</h3>
+                <button className="ai-menu" type="button" onClick={() => setModal(false)}>
+                  ×
                 </button>
-                <button className="btn btn-primary" type="submit">
-                  Create project
-                </button>
-              </div>
-              {err ? <p className="form-error">{err}</p> : null}
-            </form>
-          </Modal>
+              </header>
+              <p className="pm-create-lede">
+                Add a short brief, workflow, a reference link (Figma, Notion, Drive…), and any notes
+                for the team.
+              </p>
+              <form className="form-grid pm-create-form" onSubmit={onCreate}>
+                <Field label="Project name">
+                  <Input
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Client Portal Refresh"
+                    required
+                  />
+                </Field>
+                <Field label="Brief description">
+                  <Textarea
+                    rows={3}
+                    value={form.description}
+                    onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                    placeholder="Short brief: what this project is, who it’s for, and the outcome…"
+                    required
+                  />
+                </Field>
+                <Field label="Workflow">
+                  <Textarea
+                    rows={2}
+                    value={form.workflow}
+                    onChange={(e) => setForm((f) => ({ ...f, workflow: e.target.value }))}
+                    placeholder={DEFAULT_WORKFLOW}
+                    required
+                  />
+                </Field>
+                <Field label="Reference link">
+                  <Input
+                    type="url"
+                    value={form.flowLink}
+                    onChange={(e) => setForm((f) => ({ ...f, flowLink: e.target.value }))}
+                    placeholder="https://figma.com/… or https://notion.so/…"
+                  />
+                </Field>
+                <Field label="Notes">
+                  <Textarea
+                    rows={2}
+                    value={form.notes}
+                    onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                    placeholder="Anything the team should know about this link or process…"
+                  />
+                </Field>
+                <div className="pm-create-row pm-create-row-2">
+                  <Field label="Deadline">
+                    <Input
+                      type="date"
+                      value={form.deadline}
+                      onChange={(e) => setForm((f) => ({ ...f, deadline: e.target.value }))}
+                      required
+                    />
+                  </Field>
+                  <Field label="Status">
+                    <Select
+                      value={form.status}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, status: e.target.value as ProjectStatus }))
+                      }
+                    >
+                      <option value="planned">Planned</option>
+                      <option value="active">Active</option>
+                      <option value="on_hold">On hold</option>
+                      <option value="completed">Completed</option>
+                    </Select>
+                  </Field>
+                </div>
+                <div className="form-actions">
+                  <button className="btn btn-secondary" type="button" onClick={() => setModal(false)}>
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" type="submit">
+                    Create project
+                  </button>
+                </div>
+                {err ? <p className="form-error">{err}</p> : null}
+              </form>
+            </div>
+          </div>
         ) : null}
       </div>
     </RequirePermission>
@@ -617,9 +707,14 @@ export function PmWorkload({ store }: { store: CrmStore }) {
             <h2>Team workload</h2>
             <p>Balance open work across your developers.</p>
           </div>
-          <Link className="btn btn-primary" to="/projects/tasks">
-            Assign task
-          </Link>
+          <div className="rd-head-actions">
+            <Link className="btn btn-secondary" to="/projects/assignments?add=developer">
+              + Add developer ID
+            </Link>
+            <Link className="btn btn-primary" to="/projects/tasks">
+              Assign task
+            </Link>
+          </div>
         </header>
 
         <section className="rd-kpi-row">
@@ -877,14 +972,29 @@ export function PmReports({ store }: { store: CrmStore }) {
 /** Team + credentials + assign — keep existing Assignments but harden API sync */
 export async function syncCreateDeveloper(
   store: CrmStore,
-  input: { name: string; email: string; password: string; managerId: string },
+  input: {
+    name: string;
+    email: string;
+    password: string;
+    managerId: string;
+    id?: string;
+  },
 ) {
   let apiId: string | undefined;
   try {
-    const api = await createDeveloperApi(input);
+    const api = await createDeveloperApi({
+      name: input.name,
+      email: input.email,
+      password: input.password,
+      managerId: input.managerId,
+    });
     apiId = api.developer.id;
   } catch {
     /* local login still works */
   }
-  return store.createDeveloper({ ...input, id: apiId });
+  // Prefer manager-chosen ID when provided; otherwise use API id.
+  return store.createDeveloper({
+    ...input,
+    id: input.id?.trim() || apiId,
+  });
 }

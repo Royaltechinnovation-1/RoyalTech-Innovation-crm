@@ -32,6 +32,8 @@ export interface User {
   role: Role;
   department: string;
   avatarInitials: string;
+  /** Optional profile photo (data URL or remote URL). */
+  avatarUrl?: string;
   /** Sales executives report to a sales manager via this id. */
   managerId?: string;
 }
@@ -113,6 +115,14 @@ export interface Project {
   progress: number;
   deadline: string;
   budget: number;
+  /** Longer brief: goals, scope, context */
+  description?: string;
+  /** Delivery workflow stages or process notes */
+  workflow?: string;
+  /** Reference link (Notion, Figma, Drive, board, etc.) */
+  flowLink?: string;
+  /** Extra notes for the team about the reference / process */
+  notes?: string;
 }
 
 export interface ProjectTask {
@@ -177,6 +187,24 @@ export interface NotificationItem {
   createdAt: string;
   read: boolean;
   audienceRoles: Role[];
+  /** When set, only these users see the notification (in addition to role match if empty roles). */
+  audienceUserIds?: string[];
+}
+
+export type DailyReportStatus = "In Progress" | "Completed" | "Blocked";
+
+export interface DailyReport {
+  id: string;
+  developerId: string;
+  managerId: string;
+  date: string;
+  description: string;
+  workStatus: DailyReportStatus;
+  hours: number;
+  tasksCompleted: number;
+  attachmentName?: string;
+  createdAt: string;
+  status: "Submitted";
 }
 
 export interface ApprovalItem {
@@ -194,6 +222,12 @@ export interface ActivityLog {
   action: string;
   entity: string;
   createdAt: string;
+  /** GPS when CRM was opened (tracking). */
+  lat?: number;
+  lng?: number;
+  locationLabel?: string;
+  mapsUrl?: string;
+  accuracyM?: number;
 }
 
 export interface SyncLog {
@@ -242,4 +276,5 @@ export interface CrmData {
   activityLogs: ActivityLog[];
   syncLogs: SyncLog[];
   sheetConfig: SheetConfig;
+  dailyReports: DailyReport[];
 }

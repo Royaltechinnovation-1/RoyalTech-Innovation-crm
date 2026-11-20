@@ -1,5 +1,8 @@
 import type { CrmStore } from "../../data/store";
 import { HrmDashboard } from "./HrmDashboard";
+import { HrmEvents } from "./HrmEvents";
+import { HrmMessages } from "./HrmMessages";
+import { HrmReports } from "./HrmReports";
 import {
   HrmAttendance,
   HrmEmployees,
@@ -50,6 +53,18 @@ export function HrPerformance({ store }: { store: CrmStore }) {
 
 export function HrExit({ store }: { store: CrmStore }) {
   return <HrmExit store={store} />;
+}
+
+export function HrReports({ store }: { store: CrmStore }) {
+  return <HrmReports store={store} />;
+}
+
+export function HrMessages({ store }: { store: CrmStore }) {
+  return <HrmMessages store={store} />;
+}
+
+export function HrEvents({ store }: { store: CrmStore }) {
+  return <HrmEvents store={store} />;
 }
 
 /** @deprecated placeholders replaced by full HRM modules */

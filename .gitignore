@@ -29,6 +29,7 @@ dist-ssr
 *.sw?
 
 server/db/data/user_settings.json
+server/data/mail-accounts.json
 mysql-data/
 *.zip
 .tmp-hrm/

@@ -4,9 +4,12 @@ import { Button, PageHeader, Panel, Tag } from "../components/ui";
 import { RequirePermission } from "../components/RequirePermission";
 
 export function Notifications({ store }: { store: CrmStore }) {
-  const notes = store.data.notifications.filter((n) =>
-    n.audienceRoles.includes(store.role),
-  );
+  const notes = store.data.notifications.filter((n) => {
+    if (Array.isArray(n.audienceUserIds) && n.audienceUserIds.length > 0) {
+      return n.audienceUserIds.includes(store.currentUser.id);
+    }
+    return n.audienceRoles.includes(store.role);
+  });
 
   return (
     <RequirePermission store={store} permission="notifications">

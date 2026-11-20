@@ -129,6 +129,9 @@ export const navGroups: NavGroup[] = [
       { label: "payroll", path: "/hr/payroll", permission: "hr.payroll", icon: "payroll" },
       { label: "performance", path: "/hr/performance", permission: "hr.performance", icon: "performance" },
       { label: "exit", path: "/hr/exit", permission: "hr.exit", icon: "exit" },
+      { label: "messages", path: "/hr/messages", permission: "hr", icon: "messages" },
+      { label: "events", path: "/hr/events", permission: "hr", icon: "calendar" },
+      { label: "reports", path: "/hr/reports", permission: "hr", icon: "reports" },
     ],
   },
   {
@@ -173,13 +176,14 @@ export const navGroups: NavGroup[] = [
 ];
 
 export const utilityNav: NavItem[] = [
+  { label: "messages", path: "/hr/messages", permission: "hr", icon: "messages" },
   { label: "notification", path: "/notifications", permission: "notifications", icon: "notifications" },
   { label: "reports", path: "/reports", permission: "reports", icon: "reports" },
 ];
 
 /** Flat developer sidebar matching the dashboard mockup. */
 export const developerNav: NavItem[] = [
-  { label: "Dashboard", path: "/", permission: "dashboard", icon: "home" },
+  { label: "Developer Dashboard", path: "/", permission: "dashboard", icon: "home" },
   { label: "My Tasks", path: "/projects/tasks", permission: "projects.tasks", icon: "tasks" },
   { label: "My Projects", path: "/projects", permission: "projects", icon: "projects" },
   { label: "Daily Report", path: "/dev/daily-report", permission: "projects", icon: "clipboard" },
@@ -203,8 +207,55 @@ export const hrAdminNav: NavItem[] = [
   { label: "Payroll", path: "/hr/payroll", permission: "hr.payroll", icon: "payroll" },
   { label: "Performance", path: "/hr/performance", permission: "hr.performance", icon: "performance" },
   { label: "Exit", path: "/hr/exit", permission: "hr.exit", icon: "exit" },
+  { label: "Messages", path: "/hr/messages", permission: "hr", icon: "messages" },
+  { label: "Events", path: "/hr/events", permission: "hr", icon: "calendar" },
+  { label: "Reports", path: "/hr/reports", permission: "hr", icon: "reports" },
   { label: "Notifications", path: "/notifications", permission: "notifications", icon: "notifications" },
-  { label: "Reports", path: "/reports", permission: "reports", icon: "reports" },
+];
+
+/** Flat Sales Executive sidebar — personal book only. */
+export const salesExecutiveNav: NavItem[] = [
+  { label: "Executive Dashboard", path: "/", permission: "dashboard", icon: "home" },
+  { label: "My Leads", path: "/leads", permission: "leads", icon: "enquiry" },
+  { label: "Pipeline", path: "/leads/pipeline", permission: "pipeline", icon: "pipeline" },
+  { label: "Follow-ups", path: "/leads/followups", permission: "followups", icon: "followups" },
+  { label: "Clients", path: "/clients", permission: "clients", icon: "clients" },
+  { label: "Proposals", path: "/proposals", permission: "proposals", icon: "proposals" },
+  { label: "Deals", path: "/deals", permission: "deals", icon: "deals" },
+  { label: "Notifications", path: "/notifications", permission: "notifications", icon: "notifications" },
+  { label: "Settings", path: "/settings", permission: "dashboard", icon: "settings" },
+];
+
+/** Flat Sales Manager sidebar — same style as HR / PM. */
+export const salesManagerNav: NavItem[] = [
+  { label: "Sales Dashboard", path: "/", permission: "dashboard", icon: "home" },
+  { label: "Leads", path: "/leads", permission: "leads", icon: "enquiry" },
+  { label: "Pipeline", path: "/leads/pipeline", permission: "pipeline", icon: "pipeline" },
+  { label: "Follow-ups", path: "/leads/followups", permission: "followups", icon: "followups" },
+  { label: "Clients", path: "/clients", permission: "clients", icon: "clients" },
+  { label: "Team", path: "/sales/team", permission: "sales.team", icon: "team" },
+  { label: "Employees", path: "/sales/employees", permission: "sales.team", icon: "people" },
+  { label: "Targets", path: "/sales/targets", permission: "sales.targets", icon: "targets" },
+  { label: "Reports", path: "/sales/reports", permission: "sales.reports", icon: "reports" },
+  { label: "Sheets", path: "/sales/sheets", permission: "sales.sheets", icon: "sheets" },
+  { label: "Notifications", path: "/notifications", permission: "notifications", icon: "notifications" },
+  { label: "Settings", path: "/settings", permission: "dashboard", icon: "settings" },
+];
+
+/** Flat Project Manager sidebar — same style as HR (not nested groups). */
+export const projectManagerNav: NavItem[] = [
+  { label: "Manager Dashboard", path: "/", permission: "dashboard", icon: "home" },
+  { label: "Projects", path: "/projects", permission: "projects", icon: "projects" },
+  { label: "Team", path: "/projects/assignments", permission: "projects.assign", icon: "team" },
+  { label: "Tasks", path: "/projects/tasks", permission: "projects.tasks", icon: "tasks" },
+  { label: "Milestones", path: "/projects/milestones", permission: "projects.milestones", icon: "milestone" },
+  { label: "Workload", path: "/projects/workload", permission: "projects.workload", icon: "workload" },
+  { label: "Reports", path: "/projects/reports", permission: "projects.reports", icon: "reports" },
+  { label: "Calendar", path: "/dev/calendar", permission: "projects", icon: "calendar" },
+  { label: "Messages", path: "/dev/messages", permission: "notifications", icon: "messages" },
+  { label: "Documents", path: "/dev/documents", permission: "projects", icon: "documents" },
+  { label: "Notifications", path: "/notifications", permission: "notifications", icon: "notifications" },
+  { label: "Settings", path: "/settings", permission: "dashboard", icon: "settings" },
 ];
 
 export const settingsNav: NavItem[] = [

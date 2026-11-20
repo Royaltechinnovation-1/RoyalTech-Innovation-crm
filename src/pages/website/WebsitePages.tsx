@@ -1,22 +1,11 @@
 import type { CrmStore } from "../../data/store";
 import { formatDate } from "../../lib/format";
-import { PageHeader, Panel, Tag, Widget } from "../../components/ui";
+import { PageHeader, Panel, Tag } from "../../components/ui";
 import { RequirePermission } from "../../components/RequirePermission";
+import { WebsiteOverview } from "./WebsiteOverview";
 
 export function WebsiteDashboard({ store }: { store: CrmStore }) {
-  return (
-    <RequirePermission store={store} permission="website">
-      <div className="page">
-        <PageHeader eyebrow="Website management" title="Website Dashboard" />
-        <section className="stat-row">
-          <Widget label="Enquiries" value={store.data.enquiries.length} meta="Inbox" />
-          <Widget label="New" value={store.data.enquiries.filter((e) => e.status === "new").length} meta="Unanswered" accent="gold" />
-          <Widget label="Uptime" value="99.8%" meta="30 days" accent="forest" />
-          <Widget label="Page speed" value="92" meta="Performance score" accent="mist" />
-        </section>
-      </div>
-    </RequirePermission>
-  );
+  return <WebsiteOverview store={store} />;
 }
 
 export function Enquiries({ store }: { store: CrmStore }) {

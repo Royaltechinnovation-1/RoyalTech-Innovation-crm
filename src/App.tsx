@@ -22,10 +22,13 @@ import {
   Employees,
   HrAttendance,
   HrDashboard,
+  HrEvents,
   HrExit,
   HrInterviews,
   HrOnboarding,
+  HrMessages,
   HrPerformance,
+  HrReports,
   LeaveManagement,
   Payroll,
   Recruitment,
@@ -71,6 +74,7 @@ import {
   SystemConfig,
   Users,
 } from "./pages/settings/SettingsPages";
+import { RequireHrGoogle } from "./components/RequireHrGoogle";
 import "./App.css";
 
 export default function App() {
@@ -98,16 +102,110 @@ export default function App() {
           <Route path="sales/targets" element={<SalesTargets store={store} />} />
           <Route path="sales/reports" element={<SalesReports store={store} />} />
 
-          <Route path="hr" element={<HrDashboard store={store} />} />
-          <Route path="hr/employees" element={<Employees store={store} />} />
-          <Route path="hr/recruitment" element={<Recruitment store={store} />} />
-          <Route path="hr/interviews" element={<HrInterviews store={store} />} />
-          <Route path="hr/onboarding" element={<HrOnboarding store={store} />} />
-          <Route path="hr/attendance" element={<HrAttendance store={store} />} />
-          <Route path="hr/leave" element={<LeaveManagement store={store} />} />
-          <Route path="hr/payroll" element={<Payroll store={store} />} />
-          <Route path="hr/performance" element={<HrPerformance store={store} />} />
-          <Route path="hr/exit" element={<HrExit store={store} />} />
+          <Route
+            path="hr"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrDashboard store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/employees"
+            element={
+              <RequireHrGoogle store={store}>
+                <Employees store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/recruitment"
+            element={
+              <RequireHrGoogle store={store}>
+                <Recruitment store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/interviews"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrInterviews store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/onboarding"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrOnboarding store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/attendance"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrAttendance store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/leave"
+            element={
+              <RequireHrGoogle store={store}>
+                <LeaveManagement store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/payroll"
+            element={
+              <RequireHrGoogle store={store}>
+                <Payroll store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/performance"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrPerformance store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/exit"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrExit store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/reports"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrReports store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/messages"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrMessages store={store} />
+              </RequireHrGoogle>
+            }
+          />
+          <Route
+            path="hr/events"
+            element={
+              <RequireHrGoogle store={store}>
+                <HrEvents store={store} />
+              </RequireHrGoogle>
+            }
+          />
 
           <Route path="projects" element={<Projects store={store} />} />
           <Route path="projects/assignments" element={<ProjectAssignments store={store} />} />

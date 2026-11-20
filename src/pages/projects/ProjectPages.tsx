@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { CrmStore } from "../../data/store";
 import type { TaskStatus } from "../../types";
 import { formatCurrency, formatDate } from "../../lib/format";
@@ -34,8 +34,80 @@ export function Projects({ store }: { store: CrmStore }) {
         setData(rows);
         setError("");
       })
-      .catch((err: Error) => setError(err.message));
-  }, [store.currentUser.id, store.role]);
+      .catch(() => {
+        // Keep page usable from CRM store when API is offline.
+        const projects = store.visibleProjects.length
+          ? store.visibleProjects
+          : store.data.projects;
+        const tasks = store.data.tasks;
+        setData({
+          mode: "memory",
+          summary: {
+            projects: projects.length,
+            activeProjects: projects.filter((p) => p.status === "active").length,
+            tasks: tasks.length,
+            openTasks: tasks.filter((t) => t.status !== "done").length,
+            doing: tasks.filter((t) => t.status === "doing").length,
+            blocked: tasks.filter((t) => t.status === "blocked").length,
+            completed: tasks.filter((t) => t.status === "done").length,
+            pending: tasks.filter((t) => t.status === "todo").length,
+            overdue: 0,
+            dueSoon: 0,
+            teamSize: store.data.users.filter((u) => u.role === "developer").length,
+            pendingApprovals: 0,
+            avgProgress: Math.round(
+              projects.reduce((s, p) => s + (p.progress || 0), 0) /
+                Math.max(projects.length, 1),
+            ),
+            budget: projects.reduce((s, p) => s + (p.budget || 0), 0),
+            completionRate: Math.round(
+              (tasks.filter((t) => t.status === "done").length / Math.max(tasks.length, 1)) *
+                100,
+            ),
+          },
+          projects: projects.map((p) => ({
+            id: p.id,
+            name: p.name,
+            progress: p.progress,
+            deadline: p.deadline,
+            status: p.status,
+            budget: p.budget,
+            manager_name:
+              store.data.users.find((u) => u.id === p.managerId)?.name || "—",
+            open_tasks: tasks.filter(
+              (t) => t.projectId === p.id && t.status !== "done",
+            ).length,
+          })),
+          tasks: tasks.slice(0, 20).map((t) => ({
+            id: t.id,
+            title: t.title,
+            due_date: t.dueDate,
+            status: t.status,
+            project_name:
+              store.data.projects.find((p) => p.id === t.projectId)?.name || "Project",
+            assignee_name:
+              store.data.users.find((u) => u.id === t.assigneeId)?.name || "—",
+          })),
+          workload: store.data.users
+            .filter((u) => u.role === "developer")
+            .map((u) => ({
+              id: u.id,
+              name: u.name,
+              role: u.role,
+              open: tasks.filter((t) => t.assigneeId === u.id && t.status !== "done")
+                .length,
+            })),
+        });
+        setError("");
+      });
+  }, [
+    store.currentUser.id,
+    store.role,
+    store.data.projects,
+    store.data.tasks,
+    store.data.users,
+    store.visibleProjects,
+  ]);
 
   if (store.role === "developer") {
     return <DeveloperProjects store={store} />;
@@ -206,6 +278,7 @@ export function ProjectTasks({ store }: { store: CrmStore }) {
 export function ProjectAssignments({ store }: { store: CrmStore }) {
   const isPm = store.role === "project_manager";
   const managerId = store.currentUser.id;
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const myProjects = isPm
     ? store.visibleProjects
@@ -217,7 +290,12 @@ export function ProjectAssignments({ store }: { store: CrmStore }) {
   const [query, setQuery] = useState("");
   const [sortAz, setSortAz] = useState(true);
   const [modal, setModal] = useState<"developer" | "task" | null>(null);
-  const [devForm, setDevForm] = useState({ name: "", email: "", password: "" });
+  const [devForm, setDevForm] = useState({
+    id: "",
+    name: "",
+    email: "",
+    password: "dev123",
+  });
   const [taskForm, setTaskForm] = useState({
     projectId: myProjects[0]?.id ?? "",
     title: "",
@@ -227,11 +305,21 @@ export function ProjectAssignments({ store }: { store: CrmStore }) {
   const [devErr, setDevErr] = useState("");
   const [taskErr, setTaskErr] = useState("");
   const [toast, setToast] = useState("");
-  const [createdCreds, setCreatedCreds] = useState<{ email: string; password: string; name: string } | null>(
-    null,
-  );
+  const [createdCreds, setCreatedCreds] = useState<{
+    id: string;
+    email: string;
+    password: string;
+    name: string;
+  } | null>(null);
   const [savingDev, setSavingDev] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("add") === "developer") {
+      setModal("developer");
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const defaultProjectId = myProjects[0]?.id ?? "";
   const defaultDevId = developers[0]?.id ?? "";
@@ -265,15 +353,26 @@ export function ProjectAssignments({ store }: { store: CrmStore }) {
     e.preventDefault();
     setSavingDev(true);
     setDevErr("");
-    const local = await syncCreateDeveloper(store, { ...devForm, managerId });
+    const local = await syncCreateDeveloper(store, {
+      id: devForm.id,
+      name: devForm.name,
+      email: devForm.email,
+      password: devForm.password,
+      managerId,
+    });
     if (!local.ok) {
       setDevErr(local.error);
       setSavingDev(false);
       return;
     }
-    setCreatedCreds({ name: local.name, email: local.email, password: local.password });
-    setToast(`Developer login created for ${local.name}`);
-    setDevForm({ name: "", email: "", password: "" });
+    setCreatedCreds({
+      id: local.userId,
+      name: local.name,
+      email: local.email,
+      password: local.password,
+    });
+    setToast(`Developer ID created for ${local.name}`);
+    setDevForm({ id: "", name: "", email: "", password: "dev123" });
     setSavingDev(false);
     setModal(null);
   };
@@ -312,15 +411,19 @@ export function ProjectAssignments({ store }: { store: CrmStore }) {
         <div className="ai-page-head">
           <div>
             <p className="muted">Delivery / Team</p>
-            <h2>Developer Database</h2>
-            <p>Clean team list — create logins and assign tasks without heavy color.</p>
+            <h2>{isPm ? "My developers" : "Developer Database"}</h2>
+            <p>
+              {isPm
+                ? "Create developer IDs under you, share login details, and assign work."
+                : "Clean team list — create logins and assign tasks without heavy color."}
+            </p>
           </div>
           <div className="ai-page-actions">
             <button className="btn btn-secondary" type="button" onClick={() => setModal("task")}>
               Assign task
             </button>
             <button className="btn btn-primary" type="button" onClick={() => setModal("developer")}>
-              + Add developer
+              + Add developer ID
             </button>
           </div>
         </div>
@@ -338,7 +441,8 @@ export function ProjectAssignments({ store }: { store: CrmStore }) {
         {createdCreds ? (
           <div className="toast-banner">
             <span className="toast-banner-dot" />
-            Share login: {createdCreds.email} / {createdCreds.password}
+            Share login — ID: {createdCreds.id.toUpperCase()} · {createdCreds.email} /{" "}
+            {createdCreds.password}
             <a href="#task-list" onClick={() => setCreatedCreds(null)}>
               Done
             </a>
@@ -519,19 +623,29 @@ export function ProjectAssignments({ store }: { store: CrmStore }) {
               onClick={(e) => e.stopPropagation()}
             >
               <header>
-                <h3>{modal === "developer" ? "Add developer login" : "Assign task"}</h3>
+                <h3>{modal === "developer" ? "Create developer ID" : "Assign task"}</h3>
                 <button className="ai-menu" type="button" onClick={() => setModal(null)}>
                   ×
                 </button>
               </header>
 
               {modal === "developer" ? (
-                <form className="form-grid" onSubmit={onCreateDeveloper}>
+                <form className="form-grid form-grid-stack" onSubmit={onCreateDeveloper}>
+                  <p className="pm-create-lede" style={{ marginTop: 0 }}>
+                    New developer signs in with the email and password you set. They report to you.
+                  </p>
+                  <Field label="Developer ID (optional)">
+                    <Input
+                      value={devForm.id}
+                      onChange={(e) => setDevForm((f) => ({ ...f, id: e.target.value }))}
+                      placeholder="e.g. u20 or dev_neha"
+                    />
+                  </Field>
                   <Field label="Full name">
                     <Input
                       value={devForm.name}
                       onChange={(e) => setDevForm((f) => ({ ...f, name: e.target.value }))}
-                      placeholder="e.g. Kabir Das"
+                      placeholder="e.g. Neha Kapoor"
                       required
                     />
                   </Field>
@@ -559,7 +673,7 @@ export function ProjectAssignments({ store }: { store: CrmStore }) {
                       Cancel
                     </button>
                     <button className="btn btn-primary" type="submit" disabled={savingDev}>
-                      {savingDev ? "Creating…" : "Create login"}
+                      {savingDev ? "Creating…" : "Create developer ID"}
                     </button>
                   </div>
                   {devErr ? <p className="form-error">{devErr}</p> : null}

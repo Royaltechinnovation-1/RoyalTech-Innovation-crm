@@ -1,6 +1,12 @@
 import { useSyncExternalStore } from "react";
 import { employees as seedEmployees, departments, employmentStatuses } from "./hrm/employees.js";
-import { candidates as seedCandidates, jobs as seedJobs } from "./hrm/recruitment.js";
+import {
+  candidates as seedCandidates,
+  jobs as seedJobs,
+  candidateStages,
+  candidateSources,
+  jobStatuses,
+} from "./hrm/recruitment.js";
 import { interviews as seedInterviews } from "./hrm/interviews.js";
 import { documents as seedDocuments, onboardingPrograms as seedOnboarding } from "./hrm/onboarding.js";
 import { attendanceRecords as seedAttendance, attendanceTrend } from "./hrm/attendance.js";
@@ -14,7 +20,7 @@ import {
   upcomingBirthdays,
 } from "./hrm/dashboard.js";
 
-const STORAGE_KEY = "royaltech-hrm-data-v1";
+const STORAGE_KEY = "royaltech-hrm-data-v15";
 
 export type HrmEmployee = (typeof seedEmployees)[number];
 export type HrmCandidate = (typeof seedCandidates)[number];
@@ -28,6 +34,27 @@ export type HrmPerformance = (typeof seedPerformance)[number];
 export type HrmResignation = (typeof seedResignations)[number];
 export type HrmJob = (typeof seedJobs)[number];
 
+export type HrmEventGuest = {
+  name: string;
+  email: string;
+  employeeId?: string;
+  sentAt?: string;
+  status?: "pending" | "sent" | "failed";
+};
+
+export type HrmEvent = {
+  id: string;
+  title: string;
+  type: string;
+  date: string;
+  time: string;
+  location: string;
+  description: string;
+  guests: HrmEventGuest[];
+  mailAccount?: "titan" | "personal" | "";
+  createdAt: string;
+};
+
 export type HrmData = {
   employees: HrmEmployee[];
   candidates: HrmCandidate[];
@@ -40,7 +67,37 @@ export type HrmData = {
   payrollRecords: HrmPayroll[];
   performanceRatings: HrmPerformance[];
   resignations: HrmResignation[];
+  events: HrmEvent[];
 };
+
+function seedEvents(): HrmEvent[] {
+  return [
+    {
+      id: "EV-001",
+      title: "Monthly HR town hall",
+      type: "Meeting",
+      date: "2026-11-20",
+      time: "11:00",
+      location: "Conference Room A / Zoom",
+      description: "People ops updates, open roles, and Q&A.",
+      guests: [],
+      mailAccount: "",
+      createdAt: "2026-11-12T09:00:00.000Z",
+    },
+    {
+      id: "EV-002",
+      title: "New joiner welcome lunch",
+      type: "Onboarding",
+      date: "2026-11-18",
+      time: "13:30",
+      location: "Mohali office cafeteria",
+      description: "Welcome lunch for new joiners this week.",
+      guests: [],
+      mailAccount: "",
+      createdAt: "2026-11-11T10:00:00.000Z",
+    },
+  ];
+}
 
 function seedData(): HrmData {
   return {
@@ -55,7 +112,16 @@ function seedData(): HrmData {
     payrollRecords: structuredClone(seedPayroll) as HrmPayroll[],
     performanceRatings: structuredClone(seedPerformance) as HrmPerformance[],
     resignations: structuredClone(seedResignations) as HrmResignation[],
+    events: seedEvents(),
   };
+}
+
+function ensureEmployeeCards(list: HrmEmployee[]): HrmEmployee[] {
+  return list.map((e, i) => {
+    if (e.cardNumber) return e;
+    const n = Number(String(e.id).replace(/\D/g, "")) || i + 1;
+    return { ...e, cardNumber: `RT${String(9801000 + n).padStart(7, "0")}` } as HrmEmployee;
+  });
 }
 
 function load(): HrmData {
@@ -67,7 +133,9 @@ function load(): HrmData {
     return {
       ...base,
       ...parsed,
-      employees: parsed.employees?.length ? parsed.employees : base.employees,
+      employees: ensureEmployeeCards(
+        parsed.employees?.length ? parsed.employees : base.employees,
+      ),
       candidates: parsed.candidates?.length ? parsed.candidates : base.candidates,
       jobs: parsed.jobs?.length ? parsed.jobs : base.jobs,
       interviews: parsed.interviews?.length ? parsed.interviews : base.interviews,
@@ -84,6 +152,7 @@ function load(): HrmData {
         ? parsed.performanceRatings
         : base.performanceRatings,
       resignations: parsed.resignations?.length ? parsed.resignations : base.resignations,
+      events: Array.isArray(parsed.events) ? parsed.events : base.events,
     };
   } catch {
     return seedData();
@@ -91,16 +160,28 @@ function load(): HrmData {
 }
 
 let data = load();
+let storeVersion = 0;
+let cachedSnapshot = { data, version: storeVersion };
 const listeners = new Set<() => void>();
 
 function emit() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  storeVersion += 1;
+  cachedSnapshot = { data, version: storeVersion };
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    /* quota / private mode — still update UI */
+  }
   listeners.forEach((l) => l());
 }
 
 function setData(next: HrmData | ((prev: HrmData) => HrmData)) {
   data = typeof next === "function" ? next(data) : next;
   emit();
+}
+
+function getSnapshot() {
+  return cachedSnapshot;
 }
 
 function uid(prefix: string) {
@@ -113,31 +194,44 @@ export const hrmActions = {
     emit();
   },
 
-  upsertEmployee(row: Partial<HrmEmployee> & { name: string; email: string }) {
+  upsertEmployee(row: Partial<HrmEmployee> & { name: string; email?: string }) {
     setData((prev) => {
-      const id = row.id || uid("EMP");
+      const id = row.id || uid("RTI");
       const existing = prev.employees.find((e) => e.id === id);
       const nextRow = {
         ...(existing ?? {
           id,
+          uid: 11000 + Math.floor(Math.random() * 8000) + 1,
+          cardNumber: `RT${String(9800000 + Math.floor(Math.random() * 90000)).slice(0, 7)}`,
           phone: "",
-          department: "People",
+          email: "",
+          companyEmail: "",
+          department: "Developer Team",
           designation: "Employee",
           joiningDate: new Date().toISOString().slice(0, 10),
           status: "Active",
           employmentType: "Full-time",
-          location: "Bengaluru",
-          manager: "",
+          location: "Mohali",
+          manager: "CEO (Shreya)",
           dob: "",
           gender: "",
           salary: 0,
           skills: [],
-          address: "",
+          address: "Mohali",
           emergency: { name: "", relation: "", phone: "" },
           about: "",
+          salaryNotes: "IN Hand no deduction",
+          probationPeriod: "3 Months",
+          previousCompany: "",
+          totalExperience: "",
+          notes: "",
         }),
         ...row,
         id,
+        uid: row.uid ?? existing?.uid ?? 11000 + Math.floor(Math.random() * 8000) + 1,
+        cardNumber: row.cardNumber ?? existing?.cardNumber ?? `RT${String(9800000 + Math.floor(Math.random() * 90000)).slice(0, 7)}`,
+        email: row.email ?? existing?.email ?? "",
+        companyEmail: row.companyEmail ?? existing?.companyEmail ?? "",
       } as HrmEmployee;
       const employees = existing
         ? prev.employees.map((e) => (e.id === id ? nextRow : e))
@@ -147,12 +241,66 @@ export const hrmActions = {
   },
 
   removeEmployee(id: string) {
+    if (!id) return;
+    setData((prev) => {
+      const emp = prev.employees.find((e) => e.id === id);
+      const name = emp?.name;
+      return {
+        ...prev,
+        employees: prev.employees.filter((e) => e.id !== id),
+        attendanceRecords: prev.attendanceRecords.filter((r) => r.employeeId !== id),
+        payrollRecords: prev.payrollRecords.filter((r) => r.employeeId !== id),
+        performanceRatings: prev.performanceRatings.filter((r) => r.employeeId !== id),
+        leaveRequests: prev.leaveRequests.filter(
+          (l) => l.employeeId !== id && (!name || l.employeeName !== name),
+        ),
+        onboardingPrograms: prev.onboardingPrograms.filter(
+          (o) => o.employeeId !== id && (!name || o.name !== name),
+        ),
+        documents: prev.documents.filter(
+          (d) => d.employeeId !== id && (!name || d.employeeName !== name),
+        ),
+      };
+    });
+  },
+
+  upsertJob(row: Partial<HrmJob> & { title: string }) {
+    setData((prev) => {
+      const id = row.id || uid("JOB");
+      const existing = prev.jobs.find((j) => j.id === id);
+      const nextRow = {
+        ...(existing ?? {
+          id,
+          department: "Developer Team",
+          location: "Mohali",
+          type: "Full-time",
+          openings: 1,
+          applicants: 0,
+          shortlisted: 0,
+          postedDate: new Date().toISOString().slice(0, 10),
+          status: "Open",
+          hiringManager: "CEO (Shreya)",
+          salaryRange: "",
+          description: "",
+          requirements: [],
+        }),
+        ...row,
+        id,
+        openings: Number(row.openings ?? existing?.openings ?? 1) || 1,
+      } as HrmJob;
+      const jobs = existing
+        ? prev.jobs.map((j) => (j.id === id ? nextRow : j))
+        : [nextRow, ...prev.jobs];
+      return { ...prev, jobs };
+    });
+  },
+
+  removeJob(id: string) {
+    if (!id) return;
     setData((prev) => ({
       ...prev,
-      employees: prev.employees.filter((e) => e.id !== id),
-      attendanceRecords: prev.attendanceRecords.filter((r) => r.employeeId !== id),
-      payrollRecords: prev.payrollRecords.filter((r) => r.employeeId !== id),
-      performanceRatings: prev.performanceRatings.filter((r) => r.employeeId !== id),
+      jobs: prev.jobs.filter((j) => j.id !== id),
+      candidates: prev.candidates.filter((c) => c.jobId !== id),
     }));
   },
 
@@ -314,6 +462,56 @@ export const hrmActions = {
     }));
   },
 
+  setAttendanceDay(
+    employeeId: string,
+    date: string,
+    status: string,
+    meta?: { name?: string; department?: string },
+  ) {
+    setData((prev) => {
+      const id = `${date}-${employeeId}`;
+      const existing = prev.attendanceRecords.find((r) => r.id === id);
+      const presentLike =
+        status === "Present" || status === "Late" || status === "Halfday" || status === "Short Leave";
+      const nextRow = {
+        ...(existing ?? {
+          id,
+          employeeId,
+          name: meta?.name ?? "",
+          department: meta?.department ?? "",
+          date,
+          checkIn: "—",
+          checkOut: "—",
+          hours: 0,
+          status: "Present",
+        }),
+        status,
+        checkIn: presentLike ? (status === "Late" ? "10:15" : "09:05") : "—",
+        checkOut: presentLike
+          ? status === "Halfday" || status === "Short Leave"
+            ? "13:30"
+            : "18:30"
+          : "—",
+        hours:
+          status === "Present"
+            ? 9
+            : status === "Late"
+              ? 7.8
+              : status === "Halfday"
+                ? 4.5
+                : status === "Short Leave"
+                  ? 6
+                  : 0,
+        name: meta?.name ?? existing?.name ?? "",
+        department: meta?.department ?? existing?.department ?? "",
+      } as HrmAttendance;
+      const attendanceRecords = existing
+        ? prev.attendanceRecords.map((r) => (r.id === id ? nextRow : r))
+        : [...prev.attendanceRecords, nextRow];
+      return { ...prev, attendanceRecords };
+    });
+  },
+
   removeAttendance(id: string) {
     setData((prev) => ({
       ...prev,
@@ -408,6 +606,51 @@ export const hrmActions = {
       resignations: prev.resignations.filter((r) => r.id !== id),
     }));
   },
+
+  upsertEvent(row: Partial<HrmEvent> & { title: string }) {
+    setData((prev) => {
+      const id = row.id || uid("EV");
+      const existing = prev.events.find((e) => e.id === id);
+      const nextRow: HrmEvent = {
+        id,
+        title: row.title,
+        type: row.type || existing?.type || "Meeting",
+        date: row.date || existing?.date || new Date().toISOString().slice(0, 10),
+        time: row.time || existing?.time || "10:00",
+        location: row.location ?? existing?.location ?? "",
+        description: row.description ?? existing?.description ?? "",
+        guests: row.guests ?? existing?.guests ?? [],
+        mailAccount: row.mailAccount ?? existing?.mailAccount ?? "",
+        createdAt: existing?.createdAt || new Date().toISOString(),
+      };
+      const events = existing
+        ? prev.events.map((e) => (e.id === id ? nextRow : e))
+        : [nextRow, ...prev.events];
+      return { ...prev, events };
+    });
+  },
+
+  removeEvent(id: string) {
+    setData((prev) => ({
+      ...prev,
+      events: prev.events.filter((e) => e.id !== id),
+    }));
+  },
+
+  patchEventGuests(id: string, guests: HrmEventGuest[], mailAccount?: HrmEvent["mailAccount"]) {
+    setData((prev) => ({
+      ...prev,
+      events: prev.events.map((e) =>
+        e.id === id
+          ? {
+              ...e,
+              guests,
+              mailAccount: mailAccount ?? e.mailAccount,
+            }
+          : e,
+      ),
+    }));
+  },
 };
 
 export function useHrmStore() {
@@ -416,14 +659,17 @@ export function useHrmStore() {
       listeners.add(onStoreChange);
       return () => listeners.delete(onStoreChange);
     },
-    () => data,
-    () => data,
+    getSnapshot,
+    getSnapshot,
   );
 
   return {
-    ...snapshot,
+    ...snapshot.data,
     departments,
     employmentStatuses,
+    candidateStages,
+    candidateSources,
+    jobStatuses,
     leaveTypes,
     attendanceTrend,
     payrollTrend,
@@ -431,5 +677,6 @@ export function useHrmStore() {
     recentActivities,
     upcomingBirthdays,
     actions: hrmActions,
+    version: snapshot.version,
   };
 }

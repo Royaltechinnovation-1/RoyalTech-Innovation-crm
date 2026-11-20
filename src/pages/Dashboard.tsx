@@ -1,24 +1,23 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { CrmStore } from "../data/store";
 import { ROLE_LABELS } from "../lib/permissions";
 import { roleWorkspaces } from "../lib/roleWorkspace";
 import { formatCurrency, formatDate, leadStageLabels } from "../lib/format";
-import { fetchSuperAdminDashboard, type SuperAdminDashboardData } from "../lib/moduleApi";
-import { DbBadge, ModuleShell } from "../components/DbWidgets";
 import { PageHeader, Panel, Tag, Widget } from "../components/ui";
 import { SalesDashboard } from "./sales/SalesPages";
 import { DeveloperDashboard } from "./dev/DeveloperDashboard";
 import { ProjectManagerDashboard } from "./dev/ProjectManagerDashboard";
 import { HrmDashboard } from "./hr/HrmDashboard";
+import { SuperAdminOverview } from "./admin/SuperAdminOverview";
+import { FinanceOverview } from "./finance/FinanceOverview";
+import { WebsiteOverview } from "./website/WebsiteOverview";
 
 export function Dashboard({ store }: { store: CrmStore }) {
-  // Role-specific home dashboards.
-  if (
-    store.role === "sales_manager" ||
-    store.role === "sales_executive" ||
-    store.role === "founder"
-  ) {
+  // Role-specific home dashboards — each works with local store + optional API.
+  if (store.role === "founder") {
+    return <SuperAdminOverview store={store} />;
+  }
+  if (store.role === "sales_manager" || store.role === "sales_executive") {
     return <SalesDashboard store={store} />;
   }
   if (store.role === "developer") {
@@ -30,139 +29,13 @@ export function Dashboard({ store }: { store: CrmStore }) {
   if (store.role === "hr_admin") {
     return <HrmDashboard store={store} />;
   }
+  if (store.role === "finance_admin") {
+    return <FinanceOverview store={store} />;
+  }
+  if (store.role === "website_admin") {
+    return <WebsiteOverview store={store} />;
+  }
   return <RoleDashboard store={store} />;
-}
-
-function SuperAdminDashboard({ store }: { store: CrmStore }) {
-  const [data, setData] = useState<SuperAdminDashboardData | null>(null);
-  const [error, setError] = useState("");
-  const workspace = roleWorkspaces.founder;
-
-  useEffect(() => {
-    fetchSuperAdminDashboard()
-      .then((rows) => {
-        setData(rows);
-        setError("");
-      })
-      .catch((err: Error) => setError(err.message));
-  }, []);
-
-  return (
-    <div className="page">
-      <section className="welcome-banner">
-        <div className="welcome-copy">
-          <p className="eyebrow">
-            {workspace.greeting}, {store.currentUser.name.split(" ")[0]}
-          </p>
-          <h2>{workspace.title}</h2>
-          <p className="lede">{workspace.summary}</p>
-          <div className="welcome-meta">
-            <Tag tone="sage">Super Admin</Tag>
-            <DbBadge mode={data?.mode} />
-          </div>
-        </div>
-        <div className="welcome-shortcuts">
-          <p className="field-label">Your quick links</p>
-          <div className="shortcut-grid">
-            {workspace.shortcuts.map((item) => (
-              <Link key={item.path} className="shortcut-card" to={item.path}>
-                {item.label}
-              </Link>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <PageHeader
-        eyebrow="Super Admin dashboard"
-        title="Company overview"
-        lede="Live company pulse from MySQL across sales, HR, development, finance, and website."
-      />
-
-      <ModuleShell error={error} loading={!error && !data}>
-        {data ? (
-          <>
-            <section className="stat-row sales-stat-row">
-              <Widget label="Pipeline" value={formatCurrency(data.summary.pipeline)} meta={`${data.summary.leads} leads`} accent="sage" />
-              <Widget label="Employees" value={data.summary.employees} meta={`${data.summary.pendingLeave} leave pending`} accent="forest" />
-              <Widget label="Active projects" value={data.summary.activeProjects} meta={`${data.summary.openTasks} open tasks`} accent="gold" />
-              <Widget label="Revenue" value={formatCurrency(data.summary.revenue)} meta={`${formatCurrency(data.summary.pendingPayments)} pending`} accent="mist" />
-            </section>
-
-            <section className="sales-grid">
-              <Panel title="Modules">
-                <div className="list">
-                  {data.modules.map((mod) => (
-                    <div className="list-row" key={mod.key}>
-                      <div>
-                        <p className="list-title">{mod.label}</p>
-                        <p className="list-sub">{mod.meta}</p>
-                      </div>
-                      <strong>{mod.value}</strong>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-              <Panel title="Alerts" dark>
-                <div className="list">
-                  {data.alerts.length === 0 ? (
-                    <p className="list-sub">No urgent alerts.</p>
-                  ) : (
-                    data.alerts.map((alert) => (
-                      <div className="list-row" key={`${alert.type}-${alert.id}`}>
-                        <div>
-                          <p className="list-title">{alert.title}</p>
-                          <p className="list-sub">{alert.type}</p>
-                        </div>
-                        <Tag tone="gold">{alert.type}</Tag>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </Panel>
-            </section>
-
-            <section className="sales-grid">
-              <Panel title="Recent leads" action={<Link to="/leads">Sales</Link>}>
-                <div className="list">
-                  {data.recentLeads.map((lead) => (
-                    <div className="list-row" key={lead.id}>
-                      <div>
-                        <p className="list-title">
-                          {lead.company}
-                          <span className="muted"> · {lead.lead_id}</span>
-                        </p>
-                      </div>
-                      <div className="list-end">
-                        <Tag tone="sage">{lead.status}</Tag>
-                        <strong>{formatCurrency(Number(lead.value))}</strong>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-              <Panel title="Project pulse" action={<Link to="/projects">Development</Link>}>
-                <div className="list">
-                  {data.projectPulse.map((project) => (
-                    <div className="list-row" key={project.id}>
-                      <div>
-                        <p className="list-title">{project.name}</p>
-                        <p className="list-sub">Due {formatDate(String(project.deadline))}</p>
-                        <div className="progress" style={{ marginTop: 8 }}>
-                          <span style={{ width: `${project.progress}%` }} />
-                        </div>
-                      </div>
-                      <strong>{project.progress}%</strong>
-                    </div>
-                  ))}
-                </div>
-              </Panel>
-            </section>
-          </>
-        ) : null}
-      </ModuleShell>
-    </div>
-  );
 }
 
 function RoleDashboard({ store }: { store: CrmStore }) {
