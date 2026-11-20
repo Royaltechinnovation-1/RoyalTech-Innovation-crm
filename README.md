@@ -2,7 +2,19 @@
 
 Forest & champagne CRM for RoyalTech with role-based dashboards, a shared data model, and Google Sheets sync.
 
-## Run
+## Marketing landing (`/landing`)
+
+Next.js CRM marketing site (dark pine hero, powerful features, dashboards):
+
+```bash
+cd landing
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+## CRM app
 
 ```bash
 npm install
